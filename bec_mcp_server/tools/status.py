@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import time
 from collections import Counter
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 from bec_mcp_server.bec import compat
 from bec_mcp_server.bec.connection import BecConnection, BecUnavailableError
-from bec_mcp_server.bec.digest import age_s, jsonable, result, short_service_name
+from bec_mcp_server.bec.digest import age_s, jsonable, short_service_name
+from bec_mcp_server.tools import READ_ONLY_TOOL, BecCall, Finding, tool_result
 
 #: services every healthy BEC instance runs, in the order a reader expects them. Unique services
 #: publish their status under the bare class name; matching is on the normalized name so that
@@ -107,10 +107,12 @@ def _redis_digest(connection: BecConnection, client: Any) -> dict[str, Any]:
 
 
 def _unreachable(connection: BecConnection, exc: BecUnavailableError) -> dict[str, Any]:
-    return result(
+    return tool_result(
         False,
         f"BEC is unreachable: {exc}",
-        findings=[str(exc)],
+        findings=[
+            Finding("error", "bec_unreachable", str(exc), subject="redis", next_tool="mcp_status")
+        ],
         data={"redis": {"address": connection.redis_target, "answered": False}},
     )
 
@@ -127,7 +129,7 @@ def ping(connection: BecConnection) -> dict[str, Any]:
     services = len(names) - clients
     redis["services_publishing"] = services
     redis["clients_publishing"] = clients
-    return result(
+    return tool_result(
         True,
         f"Redis at {redis['address']} answered in {redis['round_trip_ms']:.1f} ms; "
         f"{services} services and {clients} clients publish a status.",
@@ -174,7 +176,7 @@ def status(connection: BecConnection) -> dict[str, Any]:
             f"({', '.join(CORE_SERVICES)}) publish a status."
         )
     else:
-        summary = f"BEC needs attention: {findings[0]}"
+        summary = f"BEC needs attention: {findings[0].message}"
 
     truncated = len(others) > _MAX_LISTED or len(clients) > _MAX_LISTED
     data: dict[str, Any] = {
@@ -191,52 +193,72 @@ def status(connection: BecConnection) -> dict[str, Any]:
     }
     if truncated:
         data["note"] = f"lists are capped at {_MAX_LISTED} entries; counts cover everything"
-    return result(healthy, summary, findings=findings, data=data, truncated=truncated)
+    return tool_result(healthy, summary, findings=findings, data=data, truncated=truncated)
 
 
-def _core_findings(core: dict[str, dict[str, Any]]) -> list[str]:
-    findings: list[str] = []
+def _core_findings(core: dict[str, dict[str, Any]]) -> list[Finding]:
+    findings: list[Finding] = []
     for name in CORE_SERVICES:
         entry = core.get(name)
+        logs = {"service": name, "level": "error"}
         if entry is None:
             findings.append(
-                f"{name} is not publishing a status, so it is down or cannot reach Redis; "
-                "device, scan and file data may be stale."
+                Finding(
+                    "error",
+                    "core_service_missing",
+                    f"{name} is not publishing a status, so it is down or cannot reach Redis; "
+                    "device, scan and file data may be stale",
+                    subject=name,
+                    next_tool="bec_logs",
+                    next_args=logs,
+                )
             )
         elif entry["status"] == "ERROR":
-            findings.append(f"{name} reports status ERROR.")
+            findings.append(
+                Finding(
+                    "error",
+                    "core_service_error",
+                    f"{name} reports status ERROR",
+                    subject=name,
+                    next_tool="bec_logs",
+                    next_args=logs,
+                )
+            )
         elif entry["status"] not in _HEALTHY_STATUSES:
             findings.append(
-                f"{name} reports an unknown status {entry['status']!r}, so its health is unclear."
+                Finding(
+                    "warning",
+                    "core_service_status_unknown",
+                    f"{name} reports an unknown status {entry['status']!r}, so its health is "
+                    "unclear",
+                    subject=name,
+                )
             )
     versions = {name: entry.get("bec_lib") for name, entry in core.items() if entry.get("bec_lib")}
     if len(set(versions.values())) > 1:
         listed = ", ".join(f"{name} {version}" for name, version in sorted(versions.items()))
         findings.append(
-            f"Core services run different BEC versions ({listed}); a service was probably not "
-            "restarted after an update."
+            Finding(
+                "warning",
+                "core_version_mismatch",
+                f"Core services run different BEC versions ({listed}); a service was probably "
+                "not restarted after an update",
+            )
         )
     return findings
 
 
 # ---------------------------------------------------------------------- MCP registration
 
-BecCall = Callable[..., Awaitable[Any]]
-
 
 def register(server: Any, connection: BecConnection, call: BecCall) -> None:
     """Expose bec_ping and bec_status on ``server``; ``call`` offloads under the deadline."""
-    from mcp.types import ToolAnnotations  # pylint: disable=import-outside-toplevel
-
-    read_only = ToolAnnotations(
-        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
-    )
 
     @server.tool(
         name="bec_ping",
         description="Check that BEC's Redis answers: round trip in ms and how many services "
         "publish a status.",
-        annotations=read_only,
+        annotations=READ_ONLY_TOOL,
     )
     async def bec_ping() -> dict[str, Any]:
         return await call(ping, connection)
@@ -245,7 +267,7 @@ def register(server: Any, connection: BecConnection, call: BecCall) -> None:
         name="bec_status",
         description="Is BEC healthy? Status of each core service with version, host, CPU and "
         "memory, plus other services and connected clients.",
-        annotations=read_only,
+        annotations=READ_ONLY_TOOL,
     )
     async def bec_status() -> dict[str, Any]:
         return await call(status, connection)

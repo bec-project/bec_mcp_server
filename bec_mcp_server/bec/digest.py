@@ -135,21 +135,3 @@ def short_service_name(name: str) -> str:
     if not sep:
         return name
     return f"{base}/{instance[:8]}"
-
-
-def result(
-    ok: bool,
-    summary: str,
-    *,
-    findings: list[str] | None = None,
-    data: dict[str, Any] | None = None,
-    truncated: bool = False,
-) -> dict[str, Any]:
-    """The fixed top-level shape every BEC tool returns (ok, summary, findings, data, truncated)."""
-    return {
-        "ok": ok,
-        "summary": summary,
-        "findings": findings or [],
-        "data": data or {},
-        "truncated": truncated,
-    }

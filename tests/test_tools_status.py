@@ -1,4 +1,3 @@
-import asyncio
 import json
 import time
 
@@ -6,9 +5,10 @@ import anyio
 import pytest
 from bec_lib import messages
 from bec_lib.messages import BECStatus
-from mcp import Client
-from mcp.server.mcpserver import MCPServer
+from mcp.client import Client
 
+from bec_mcp_server.app import build_app
+from bec_mcp_server.settings import Settings
 from bec_mcp_server.tools import status as status_tools
 
 OWN_NAME = "BECMCPClient/0123456789abcdef"
@@ -171,35 +171,27 @@ def test_ping_counts_services_and_clients(make_connection):
 # ---------------------------------------------------------------------------- through MCP
 
 
-def _server(connection):
-    server = MCPServer("bec-test")
-
-    async def call(func, *args):
-        return await anyio.to_thread.run_sync(lambda: func(*args))
-
-    status_tools.register(server, connection, call)
-    return server
+def _payload(result):
+    assert not result.is_error, result.content[0].text
+    return json.loads(result.content[0].text)
 
 
-async def _call(server, name):
-    async with Client(server) as client:
-        tools = await client.list_tools()
-        result = await client.call_tool(name, {})
-    return tools, result
+def test_tools_are_registered_read_only_in_diagnose_mode(make_connection):
+    app = build_app(Settings(), connection=_connection(make_connection, _healthy_statuses()))
+
+    async def list_tools():
+        async with Client(app.server, mode="legacy") as client:
+            return (await client.list_tools()).tools
+
+    tools = {tool.name: tool for tool in anyio.run(list_tools)}
+    assert set(tools) == {"mcp_status", "bec_ping", "bec_status"}
+    assert all(tool.annotations.read_only_hint for tool in tools.values())
 
 
-def test_tools_are_read_only_and_answer_through_mcp(make_connection):
-    connection = _connection(make_connection, _healthy_statuses())
-    tools, result = asyncio.run(_call(_server(connection), "bec_status"))
-
-    assert {tool.name for tool in tools.tools} == {"bec_ping", "bec_status"}
-    assert all(tool.annotations.read_only_hint for tool in tools.tools)
-    assert result.is_error is False
-    assert result.structured_content["ok"] is True
-
-
-def test_no_stdout_during_a_tool_call(make_connection, capsys):
+@pytest.mark.parametrize("tool", ["bec_ping", "bec_status"])
+def test_tools_answer_through_mcp_without_stdout(make_connection, call_tool, stdout_guard, tool):
     class Noisy(dict):
+        # bec_lib helpers print; the stdio transport must never see it
         def __iter__(self):
             print("Waiting for services...")
             return super().__iter__()
@@ -209,9 +201,30 @@ def test_no_stdout_during_a_tool_call(make_connection, capsys):
             return super().keys()
 
     connection = _connection(make_connection, Noisy(_healthy_statuses()))
-    asyncio.run(_call(_server(connection), "bec_ping"))
-    asyncio.run(_call(_server(connection), "bec_status"))
+    app = build_app(Settings(), connection=connection)
+    with stdout_guard():
+        payload = _payload(call_tool(app.server, tool))
+    assert payload["ok"] is True
 
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "Waiting for services" in captured.err
+
+def test_bec_down_answers_within_the_deadline(make_connection, call_tool):
+    app = build_app(Settings(tool_timeout=5), connection=make_connection(swallow_failure=True))
+    started = time.monotonic()
+    payload = _payload(call_tool(app.server, "bec_status"))
+    assert time.monotonic() - started < 5
+    assert payload["ok"] is False
+    assert payload["findings"][0].startswith("Error: Could not connect")
+    assert payload["data"]["findings"][0]["next"] == {"tool": "mcp_status", "args": {}}
+
+
+def test_mcp_status_reports_the_client_age(make_connection, call_tool, fake_clock):
+    connection = make_connection(clock=fake_clock)
+    app = build_app(Settings(), connection=connection)
+    assert _payload(call_tool(app.server, "mcp_status"))["data"]["bec"]["state"] == "not_connected"
+
+    call_tool(app.server, "bec_ping")
+    fake_clock.now += 42
+    bec = _payload(call_tool(app.server, "mcp_status"))["data"]["bec"]
+    assert bec["state"] == "connected"
+    assert bec["client_age_s"] == 42.0
+    assert bec["client_starts"] == 1
