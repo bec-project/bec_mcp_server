@@ -149,6 +149,25 @@ def test_redis_failure_during_a_call_replaces_the_client(make_connection):
     assert "Redis failure" in connection.state()["last_restart_reason"]
 
 
+def test_broken_client_is_kept_while_redis_is_still_gone(make_connection):
+    # a shutdown and a fresh start would each wait on the dead Redis again
+    connection = make_connection()
+    with pytest.raises(BecUnavailableError):
+        with connection.use() as client:
+            raise redis.exceptions.TimeoutError("Timeout reading from socket")
+
+    client.connector.alive = False
+    with pytest.raises(BecUnavailableError, match="still does not answer"):
+        connection.connect()
+    assert len(connection.factory.clients) == 1
+    assert not client.shutdown_calls
+
+    client.connector.alive = True
+    connection.connect()
+    assert len(connection.factory.clients) == 2
+    assert client.shutdown_calls
+
+
 def test_other_errors_propagate_and_keep_the_client(make_connection):
     connection = make_connection()
 
