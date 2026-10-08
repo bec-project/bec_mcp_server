@@ -1,4 +1,18 @@
-from bec_mcp_server.server import parse_args
+import asyncio
+
+from bec_mcp_server.server import build_server, parse_args
+
+EXPECTED_TOOLS = {
+    "bec_ping",
+    "bec_summary",
+    "bec_services",
+    "bec_devices",
+    "bec_device_config",
+    "bec_scans",
+    "bec_scan_details",
+    "bec_scan_interlock",
+    "bec_queue",
+}
 
 
 def test_parse_args_defaults_to_streamable_http():
@@ -23,3 +37,12 @@ def test_parse_args_accepts_lazy_connect_flag():
     args = parse_args(["--lazy-connect"])
 
     assert args.lazy_connect is True
+
+
+def test_build_server_registers_only_read_only_tools_without_connecting():
+    server = build_server(connect_on_startup=False)
+
+    tools = asyncio.run(server.list_tools())
+
+    assert {tool.name for tool in tools} == EXPECTED_TOOLS
+    assert all(tool.annotations.readOnlyHint for tool in tools)
