@@ -91,6 +91,7 @@ Every option can also be set through the environment:
 | `--client-max-age` | `BEC_MCP_CLIENT_MAX_AGE` | `21600` | Seconds before the BEC client is restarted; `0` never |
 | | `BEC_MCP_REDIS_TIMEOUT` | `5` | Seconds before a Redis connect or reply gives up |
 | | `BEC_MCP_LOG_DIR` | `~/.cache/bec-mcp-server/logs` | bec_lib's log files, unless the service config sets them |
+| `--docs-index` | `BEC_MCP_DOCS_INDEX` | bundled | Docs search index: a `.json`/`.json.gz` file or an http(s) URL |
 
 Each tool call runs on a worker thread with a deadline, so a wedged Redis turns into an error
 message instead of a hung session. The audit log records the tool, its arguments, the duration and
@@ -107,10 +108,31 @@ the outcome of every call, including calls to unknown tools or with invalid argu
 | `bec_scan_help` | How to run one scan: its arguments with types, units, bounds and defaults, and an example call built from its signature with the session's own motors |
 | `bec_scan_history` | The latest finished scans with number, status and duration, and findings for scans that did not close cleanly; file paths are for the user |
 | `bec_logs` | Recent log records filtered by service, minimum level, text and time window, with repeats collapsed into counts and alarms merged into one list with findings |
+| `bec_docs_search` | The bec_docs pages that best match a question or keywords, with their URLs |
+| `bec_docs_page` | The text of one bec_docs page, or of one section of it |
 
 Every tool answers with the same top-level keys: `ok`, `summary`, `findings`, `data` and
 `truncated`. When BEC is unreachable, `bec_ping` and `bec_status` answer `ok: false` with the
 reason rather than failing.
+
+## Docs search
+
+`bec_docs_search` and `bec_docs_page` answer from an index of the published
+[bec_docs](https://github.com/bec-project/bec_docs) pages. The server ships a small copy of that
+index; point `--docs-index` at a newer file or URL to serve current docs. An unreadable or
+unreachable index falls back to the bundled copy, and `mcp_status` says so. A file is reloaded when
+it changes, and a URL is downloaded again every hour.
+
+Build an index from a bec_docs checkout. Only pages in the site navigation are indexed, so drafts
+and placeholders never reach the agent. The builder needs only the standard library, so bec_docs CI
+can run it without installing the server (`python bec_mcp_server/docs/build.py ...`):
+
+```bash
+bec-mcp-build-docs-index path/to/bec_docs --output bec_docs_index.json.gz
+```
+
+To refresh the bundled copy, build from bec_docs `main` with
+`--output bec_mcp_server/docs/bec_docs_index.json.gz`.
 
 ## Development
 

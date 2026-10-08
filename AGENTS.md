@@ -47,6 +47,7 @@ local model and that sees nothing but the server's tools.
 | `bec_mcp_server/runtime.py` | Worker offload with deadlines and bounded pools, call statistics. |
 | `bec_mcp_server/audit.py` | The per-call JSONL audit log, observed at the protocol boundary. |
 | `bec_mcp_server/bec/` | `connection.py`: `BecConnection`, the one `BECClient` (lazy start, checks, restarts, shutdown); tools borrow it with `with connection.use() as client`. `digest.py`: JSON-safe digests of BEC values. `compat.py`: the only place for private `bec_lib` attributes. |
+| `bec_mcp_server/docs/` | Docs search: the bec_docs index builder (standard library only), BM25 search, and the bundled index. |
 | `bec_mcp_server/tools/` | Tool modules, each with `register(server, connection, call)`, listed per tier in `app.TIER_MODULES`; `__init__.py` holds `READ_ONLY_TOOL`, `Finding` and `tool_result()`. |
 | `tests/` | Unit tests. They run against fakes and never need a running BEC or Redis. |
 | `docs/decisions/` | Decision records, numbered `NNNN-<slug>.md`. |
@@ -119,8 +120,8 @@ with the `call_tool` fixture (see `tests/test_app.py`), not only its helper.
 - [`bec`](https://github.com/bec-project/bec) — `bec_lib` and `bec_ipython_client` are dependencies.
   The server relies on a few private `bec_lib` attributes, so a `bec_lib` release can break it; keep
   such access in as few places as possible.
-- [`bec_docs`](https://github.com/bec-project/bec_docs) — the documentation that a later docs-search
-  tool will index.
+- [`bec_docs`](https://github.com/bec-project/bec_docs) — the documentation that `bec_docs_search`
+  indexes; only pages in its site navigation are included.
 
 ## Commit & Pull Request Guidelines
 
