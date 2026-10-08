@@ -1,0 +1,52 @@
+# Agent images for the BEC MCP server. Each one knows only BEC_MCP_URL and BEC_MCP_TOKEN: no BEC
+# source code, no Redis credentials, no beamline files. See deploy/README.md for how to run them.
+#
+# Build with deploy/ as the context, picking one target:
+#
+#   podman build -f deploy/agent/Containerfile --target check  -t bec-mcp-check    deploy
+#   podman build -f deploy/agent/Containerfile --target claude -t bec-agent-claude deploy
+#   podman build -f deploy/agent/Containerfile --target qwen   -t bec-agent-qwen   deploy
+#   podman build -f deploy/agent/Containerfile --target ollama -t bec-agent-ollama deploy
+
+ARG PYTHON_IMAGE=docker.io/library/python:3.12-slim
+ARG NODE_IMAGE=docker.io/library/node:22-slim
+
+# --- check: list the tools and call mcp_status, to prove the URL and token work --------------
+FROM ${PYTHON_IMAGE} AS check
+ARG MCP_VERSION=2.3.0
+RUN pip install --no-cache-dir "mcp==${MCP_VERSION}" \
+    && useradd --create-home --shell /usr/sbin/nologin agent
+COPY agent/mcp_check.py /usr/local/lib/bec-mcp-check.py
+USER agent
+ENTRYPOINT ["python", "-u", "/usr/local/lib/bec-mcp-check.py"]
+
+# --- claude: Claude Code, with the server in a project-scoped .mcp.json -----------------------
+FROM ${NODE_IMAGE} AS claude
+ARG CLAUDE_CODE_VERSION=2.1.295
+RUN npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    && npm cache clean --force
+USER node
+WORKDIR /home/node/work
+# .mcp.json and the settings hold ${BEC_MCP_URL} and ${BEC_MCP_TOKEN}, never the token itself.
+COPY --chown=node:node clients/claude-mcp.json /home/node/work/.mcp.json
+COPY --chown=node:node agent/claude-settings.json /home/node/.claude/settings.json
+ENTRYPOINT ["claude"]
+
+# --- qwen: qwen-code, for a model behind an OpenAI-compatible endpoint (e.g. Ollama) ----------
+FROM ${NODE_IMAGE} AS qwen
+ARG QWEN_CODE_VERSION=0.25.0
+RUN npm install --global "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
+    && npm cache clean --force
+USER node
+WORKDIR /home/node/work
+COPY --chown=node:node clients/qwen-settings.json /home/node/.qwen/settings.json
+ENTRYPOINT ["qwen"]
+
+# --- ollama: ollmcp, a terminal chat for Ollama models with MCP tools -------------------------
+FROM ${PYTHON_IMAGE} AS ollama
+ARG OLLMCP_VERSION=0.35.1
+RUN pip install --no-cache-dir "ollmcp==${OLLMCP_VERSION}" \
+    && useradd --create-home --shell /usr/sbin/nologin agent
+COPY agent/ollmcp_entrypoint.py /usr/local/lib/ollmcp_entrypoint.py
+USER agent
+ENTRYPOINT ["python", "/usr/local/lib/ollmcp_entrypoint.py"]

@@ -1,0 +1,67 @@
+# bec-mcp.service: the BEC MCP server as a systemd service on the BEC host.
+#
+# Serves streamable HTTP on 127.0.0.1:8000 for agents in containers on the same host. It reads BEC
+# through one BECClient with the read-only mcp_ro Redis account and requires a bearer token.
+# Install it as described in deploy/README.md:
+#
+#   install -m 644 deploy/host/bec-mcp.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now bec-mcp
+
+[Unit]
+Description=BEC MCP server (read-only BEC diagnostics for AI agents)
+Documentation=https://github.com/bec-project/bec_mcp_server/blob/main/deploy/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=bec-mcp
+Group=bec-mcp
+
+# Non-secret settings: the BEC Redis address and the host names agents may use.
+EnvironmentFile=/etc/bec-mcp/bec-mcp.env
+
+# Secrets: root:bec-mcp, mode 640, so only root and this service can read them. Leave out the
+# BEC_MCP_ACL_FILE line on a development Redis without ACLs.
+Environment=BEC_MCP_TOKEN_FILE=/etc/bec-mcp/token
+Environment=BEC_MCP_ACL_FILE=/etc/bec-mcp/mcp_ro.env
+
+# The client writes BEC log files and the server writes its audit log; both go under
+# /var/lib/bec-mcp, the only writable place this service has.
+StateDirectory=bec-mcp
+StateDirectoryMode=0750
+Environment=HOME=%S/bec-mcp
+Environment=BEC_MCP_LOG_DIR=%S/bec-mcp/logs
+Environment=BEC_MCP_AUDIT_LOG=%S/bec-mcp/audit.jsonl
+
+ExecStart=/opt/bec-mcp/venv/bin/bec-mcp-server --transport streamable-http --host 127.0.0.1 --port 8000
+
+Restart=always
+RestartSec=5
+# A backstop for BECClient structures that only grow (the server also restarts its client on a
+# timer). Hitting the cap kills the process and Restart= brings it back fresh.
+MemoryMax=2G
+
+# Hardening: a Redis client that serves HTTP on loopback needs none of the following.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
