@@ -13,7 +13,14 @@ missing, and a test in tests/test_compat.py.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from typing import Any
+
+try:
+    from bec_lib.device import rpc_method_context
+except ImportError:  # pragma: no cover - bec_lib without the RPC context hook
+    rpc_method_context = None
 
 
 def own_service_name(client: Any) -> str | None:
@@ -46,6 +53,45 @@ def device_config(device: Any) -> Any:
     the remaining fields. Checked on 4.1.6.
     """
     return getattr(device.root, "_config", None)
+
+
+def device_info(device: Any) -> dict[str, Any]:
+    """Device-info payload the device server published for a device (``DeviceBase._info``).
+
+    It holds the signal tree with kinds and metadata, hints, the describe output, sub-devices and
+    the custom user-access methods. Empty when the device server sent none. Checked on 4.1.6.
+    """
+    info = getattr(device, "_info", None)
+    return dict(info) if isinstance(info, dict) else {}
+
+
+class DeviceRPCRefused(RuntimeError):
+    """Raised when code inside forbid_device_rpc() tries to call a device over RPC."""
+
+
+def _refuse_rpc(device: str, func_call: str, *_args: Any, **_kwargs: Any) -> Any:
+    raise DeviceRPCRefused(
+        f"refused device RPC {device}.{func_call}: this server reads cached values only"
+    )
+
+
+@contextlib.contextmanager
+def forbid_device_rpc() -> Iterator[None]:
+    """Make every device RPC in this context raise instead of reaching the scan queue.
+
+    A non-cached read, a get() on a signal, a cached read of an ``omitted`` signal, and touching
+    a device attribute that bec_lib serves over RPC all dispatch through
+    ``bec_lib.device.rpc_method_context``; setting it here refuses them in the current thread.
+    Checked on 4.1.6.
+    """
+    if rpc_method_context is None:  # pragma: no cover - older bec_lib
+        yield
+        return
+    token = rpc_method_context.set(_refuse_rpc)
+    try:
+        yield
+    finally:
+        rpc_method_context.reset(token)
 
 
 def refresh_queue(queue_storage: Any) -> None:
