@@ -40,6 +40,8 @@ dev = [
   "pytest>=8,<10",
   "pytest-random-order~=1.1",
 ]
+# real BEC 4 services for tests/e2e (python -m pytest --start-servers tests/e2e); needs redis-server
+e2e = ["bec-server>=4.0", "pytest-bec-e2e>=4.0", "pytest-timeout>=2"]
 
 [project.scripts]
 bec-mcp-server = "bec_mcp_server.cli:main"
