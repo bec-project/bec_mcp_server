@@ -17,7 +17,7 @@ from typing import Any
 MAX_INLINE_SEQUENCE = 16
 
 
-def jsonable(value: Any) -> Any:
+def jsonable(value: Any) -> Any:  # pylint: disable=too-many-return-statements
     """Convert a bec_lib value (pydantic models, enums, numpy, containers) to plain JSON data."""
     if value is None or isinstance(value, (bool, str)):
         return value

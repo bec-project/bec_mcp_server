@@ -41,12 +41,15 @@ class _ThreadRoutedStdout:
         return self._target
 
     def write(self, text: str) -> int:
+        """Write to stdout, or to stderr from a guarded thread."""
         return self._stream.write(text)
 
     def writelines(self, lines: Any) -> None:
+        """Write lines to stdout, or to stderr from a guarded thread."""
         self._stream.writelines(lines)
 
     def flush(self) -> None:
+        """Flush the stream this thread writes to."""
         self._stream.flush()
 
     def __getattr__(self, name: str) -> Any:
