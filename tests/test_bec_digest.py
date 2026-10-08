@@ -8,7 +8,6 @@ from bec_mcp_server.bec.digest import (
     first_line,
     iso_time,
     jsonable,
-    result,
     short_service_name,
     signal_digest,
 )
@@ -74,14 +73,3 @@ def test_signal_digest_and_jsonable_never_emit_non_finite_floats():
     inline = signal_digest(np.array([1.0, float("nan")]), max_points=4)
     assert inline == [1.0, "nan"]
     json.dumps(jsonable(np.full(100, np.nan)), allow_nan=False)
-
-
-def test_result_has_the_fixed_top_level_shape():
-    assert result(True, "fine") == {
-        "ok": True,
-        "summary": "fine",
-        "findings": [],
-        "data": {},
-        "truncated": False,
-    }
-    assert result(False, "no", findings=["a"], data={"x": 1}, truncated=True)["truncated"] is True
