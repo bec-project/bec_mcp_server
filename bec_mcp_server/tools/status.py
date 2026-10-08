@@ -238,7 +238,7 @@ def register(server: Any, connection: BecConnection, call: BecCall) -> None:
         "publish a status.",
         annotations=read_only,
     )
-    async def bec_ping() -> dict:
+    async def bec_ping() -> dict[str, Any]:
         return await call(ping, connection)
 
     @server.tool(
@@ -247,5 +247,5 @@ def register(server: Any, connection: BecConnection, call: BecCall) -> None:
         "memory, plus other services and connected clients.",
         annotations=read_only,
     )
-    async def bec_status() -> dict:
+    async def bec_status() -> dict[str, Any]:
         return await call(status, connection)
