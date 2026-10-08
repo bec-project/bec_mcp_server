@@ -11,7 +11,6 @@ requires-python = ">=3.11"
 dependencies = [
   "bec-lib>=3.0",
   "mcp>=1.0",
-  "qdrant-client>=1.10",
   "uvicorn>=0.30",
 ]
 
@@ -22,7 +21,6 @@ dev = [
 
 [project.scripts]
 bec-mcp-server = "bec_mcp_server.server:main"
-bec-mcp-build-docs-index = "bec_mcp_server.docs_index:main"
 
 [tool.hatch.build.targets.wheel]
 include = ["*"]

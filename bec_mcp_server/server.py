@@ -7,7 +7,6 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from bec_mcp_server.client import BecConnection
-from bec_mcp_server.docs_search import BecDocumentation
 
 
 def _env_str(name: str, default: str) -> str:
@@ -39,7 +38,6 @@ def build_server(
         streamable_http_path=streamable_http_path,
     )
     bec = BecConnection()
-    docs = BecDocumentation()
     if connect_on_startup:
         bec.connect()
 
@@ -122,30 +120,6 @@ def build_server(
     def bec_queue() -> dict:
         """Return a compact summary of the current BEC scan queues."""
         return bec.queue()
-
-    @mcp.tool(
-        description="Safe to run. Read-only. Return the current documentation index configuration and load status.",
-        annotations=READ_ONLY_TOOL,
-    )
-    def bec_docs_status() -> dict:
-        """Return the current documentation index configuration and load status."""
-        return docs.status()
-
-    @mcp.tool(
-        description="Safe to run. Read-only. Search the local BEC documentation index for relevant sections.",
-        annotations=READ_ONLY_TOOL,
-    )
-    def bec_docs_search(query: str, limit: int = 5) -> dict:
-        """Search the local BEC documentation index for relevant sections."""
-        return docs.search(query=query, limit=limit)
-
-    @mcp.tool(
-        description="Safe to run. Read-only. Return the parsed text content for one documentation page.",
-        annotations=READ_ONLY_TOOL,
-    )
-    def bec_docs_page(path: str) -> dict:
-        """Return the parsed text content for one documentation page."""
-        return docs.page(path=path)
 
     return mcp
 
