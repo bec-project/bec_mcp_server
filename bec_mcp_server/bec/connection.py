@@ -207,20 +207,28 @@ def _redis_failure_types() -> tuple[type[BaseException], ...]:
     )
 
 
-def _bounded_connector_cls(timeout_s: float) -> type:
-    """RedisConnector whose connections give up after ``timeout_s`` instead of hanging."""
+def _fail_fast_connector_cls(timeout_s: float) -> type:
+    """RedisConnector that gives up on a lost Redis instead of hanging."""
     # pylint: disable=import-outside-toplevel
     from bec_lib.redis_connector import RedisConnector
 
-    class BoundedRedisConnector(RedisConnector):
-        """RedisConnector with socket connect and reply timeouts."""
+    class FailFastRedisConnector(RedisConnector):
+        """RedisConnector with socket timeouts and without bec_lib's connection retries."""
 
         def __init__(self, bootstrap: Any, *args: Any, **kwargs: Any) -> None:
             kwargs.setdefault("socket_connect_timeout", timeout_s)
             kwargs.setdefault("socket_timeout", timeout_s)
             super().__init__(bootstrap, *args, **kwargs)
 
-    return BoundedRedisConnector
+        def set_retry_enabled(self, enabled: bool) -> None:
+            # BECService enables 20 retries with backoff of up to 30 s each once it has started.
+            # redis-py copies the policy into every connection it opens, so switching it off
+            # later misses the connections the client's stream thread already holds: a lost
+            # Redis then blocks that thread, and its shutdown, for minutes. A diagnostic call
+            # fails fast instead, and the next call starts a fresh client.
+            super().set_retry_enabled(False)
+
+    return FailFastRedisConnector
 
 
 def _default_client_factory(service_config: ServiceConfig, connector_cls: type) -> BECClient:
@@ -307,7 +315,10 @@ class BecConnection:
             pass
 
     def _acquire(self) -> tuple[Any, int]:
-        if not self._start_lock.acquire(timeout=self.START_LOCK_TIMEOUT_S):
+        # a bounded acquire, which `with` cannot express
+        if not self._start_lock.acquire(  # pylint: disable=consider-using-with
+            timeout=self.START_LOCK_TIMEOUT_S
+        ):
             raise BecUnavailableError(
                 "another call is still connecting to BEC; retry in a few seconds"
             )
@@ -385,7 +396,7 @@ class BecConnection:
             raise self._fail(f"BEC service config not found: {exc}") from exc
         self._redis_target = str(service_config.redis)
         client = self._client_factory(
-            service_config, _bounded_connector_cls(self.config.redis_timeout_s)
+            service_config, _fail_fast_connector_cls(self.config.redis_timeout_s)
         )
         try:
             client.start()
@@ -396,12 +407,6 @@ class BecConnection:
         if problem is not None:
             self._safe_shutdown(client)
             raise self._fail(problem)
-        try:
-            # bec_lib retries a lost Redis for minutes with exponential backoff; a diagnostic
-            # call must fail fast instead, and the next call starts a fresh client
-            client.connector.set_retry_enabled(False)
-        except Exception:  # pylint: disable=broad-except
-            logger.warning("could not disable Redis retries on the BEC client", exc_info=True)
         logger.info("BEC client started against Redis %s", self._redis_target)
         return client
 
@@ -529,7 +534,9 @@ class BecConnection:
             self._closed = True
         # if a wedged start never releases the lock, give up: the closed flag stops that start
         # from keeping its client, and leaking a half-started client beats hanging the exit
-        if not self._start_lock.acquire(timeout=self.START_LOCK_TIMEOUT_S):
+        if not self._start_lock.acquire(  # pylint: disable=consider-using-with
+            timeout=self.START_LOCK_TIMEOUT_S
+        ):
             logger.warning("BEC client start still running at shutdown; not waiting for it")
             return
         try:
