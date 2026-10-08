@@ -49,6 +49,7 @@ local model and that sees nothing but the server's tools.
 | `bec_mcp_server/bec/` | `connection.py`: `BecConnection`, the one `BECClient` (lazy start, checks, restarts, shutdown); tools borrow it with `with connection.use() as client`. `digest.py`: JSON-safe digests of BEC values. `compat.py`: the only place for private `bec_lib` attributes. |
 | `bec_mcp_server/docs/` | Docs search: the bec_docs index builder (standard library only), BM25 search, and the bundled index. |
 | `bec_mcp_server/tools/` | Tool modules, each with `register(server, connection, call)`, listed per tier in `app.TIER_MODULES`; `__init__.py` holds `READ_ONLY_TOOL`, `Finding` and `tool_result()`. |
+| `deploy/` | Deployment kit: the host's systemd unit, the agent container images and client configs, and the `mcp_ro` Redis account. `tests/test_deploy_kit.py` keeps its flags and variables in step with the CLI. |
 | `tests/` | Unit tests. They run against fakes and never need a running BEC or Redis. |
 | `docs/decisions/` | Decision records, numbered `NNNN-<slug>.md`. |
 | `.github/workflows/ci.yml` | Lint, the Python 3.11 to 3.14 test matrix, and a wheel build installed into a clean environment. |
