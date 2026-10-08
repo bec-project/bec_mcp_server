@@ -43,13 +43,19 @@ def _core_name(service_name: str) -> str | None:
     return None
 
 
+#: processes that serve a person rather than the beamline: IPython, the GUI, an editor's
+#: language server, MCP servers
+_CLIENT_MARKERS = ("client", "becwidgets", "pylsp")
+
+
 def _is_client(service_name: str) -> bool:
-    return "client" in _normalized(service_name)
+    normalized = _normalized(service_name)
+    return any(marker in normalized for marker in _CLIENT_MARKERS)
 
 
 def _status_name(message: Any) -> str:
-    status = getattr(message, "status", None)
-    return getattr(status, "name", None) or str(jsonable(status))
+    value = getattr(message, "status", None)
+    return getattr(value, "name", None) or str(jsonable(value))
 
 
 def _service_entry(
@@ -148,36 +154,9 @@ def status(connection: BecConnection) -> dict[str, Any]:
     except BecUnavailableError as exc:
         return _unreachable(connection, exc)
 
-    now = time.time()
-    core: dict[str, dict[str, Any]] = {}
-    others: list[dict[str, Any]] = []
-    clients: list[dict[str, Any]] = []
-    for name, message in sorted(statuses.items()):
-        entry = _service_entry(name, message, metrics, own_name, now)
-        core_name = _core_name(name)
-        if core_name is not None and core_name not in core:
-            core[core_name] = entry
-        elif _is_client(name):
-            clients.append(entry)
-        else:
-            others.append(entry)
-
+    core, others, clients = _group_services(statuses, metrics, own_name)
     findings = _core_findings(core)
-    present = [name for name in CORE_SERVICES if name in core]
-    healthy = not findings
-    if healthy:
-        summary = (
-            f"BEC is healthy: all {len(CORE_SERVICES)} core services are running "
-            f"({len(others)} other services and {len(clients)} clients publish a status)."
-        )
-    elif not present:
-        summary = (
-            "BEC is down: Redis answers, but none of the core services "
-            f"({', '.join(CORE_SERVICES)}) publish a status."
-        )
-    else:
-        summary = f"BEC needs attention: {findings[0].message}"
-
+    summary = _status_summary(core, findings, len(others), len(clients))
     truncated = len(others) > _MAX_LISTED or len(clients) > _MAX_LISTED
     data: dict[str, Any] = {
         "redis": redis,
@@ -193,7 +172,43 @@ def status(connection: BecConnection) -> dict[str, Any]:
     }
     if truncated:
         data["note"] = f"lists are capped at {_MAX_LISTED} entries; counts cover everything"
-    return tool_result(healthy, summary, findings=findings, data=data, truncated=truncated)
+    return tool_result(not findings, summary, findings=findings, data=data, truncated=truncated)
+
+
+def _status_summary(
+    core: dict[str, dict[str, Any]], findings: list[Finding], others: int, clients: int
+) -> str:
+    if not findings:
+        return (
+            f"BEC is healthy: all {len(CORE_SERVICES)} core services are running "
+            f"({others} other services and {clients} clients publish a status)."
+        )
+    if not core:
+        return (
+            "BEC is down: Redis answers, but none of the core services "
+            f"({', '.join(CORE_SERVICES)}) publish a status."
+        )
+    return f"BEC needs attention: {findings[0].message}"
+
+
+def _group_services(
+    statuses: dict[str, Any], metrics: dict[str, Any], own_name: str | None
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split the status entries into core services (by name), other services and clients."""
+    now = time.time()
+    core: dict[str, dict[str, Any]] = {}
+    others: list[dict[str, Any]] = []
+    clients: list[dict[str, Any]] = []
+    for name, message in sorted(statuses.items()):
+        entry = _service_entry(name, message, metrics, own_name, now)
+        core_name = _core_name(name)
+        if core_name is not None and core_name not in core:
+            core[core_name] = entry
+        elif _is_client(name):
+            clients.append(entry)
+        else:
+            others.append(entry)
+    return core, others, clients
 
 
 def _core_findings(core: dict[str, dict[str, Any]]) -> list[Finding]:
