@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 from collections import Counter
+from importlib import metadata
 from typing import Any
 
 from bec_mcp_server.bec import compat
@@ -156,7 +157,9 @@ def status(connection: BecConnection) -> dict[str, Any]:
 
     core, others, clients = _group_services(statuses, metrics, own_name)
     findings = _core_findings(core)
-    summary = _status_summary(core, findings, len(others), len(clients))
+    problems = [finding for finding in findings if finding.severity != "info"]
+    findings += _server_version_findings(core)
+    summary = _status_summary(core, problems, len(others), len(clients))
     truncated = len(others) > _MAX_LISTED or len(clients) > _MAX_LISTED
     data: dict[str, Any] = {
         "redis": redis,
@@ -172,7 +175,26 @@ def status(connection: BecConnection) -> dict[str, Any]:
     }
     if truncated:
         data["note"] = f"lists are capped at {_MAX_LISTED} entries; counts cover everything"
-    return tool_result(not findings, summary, findings=findings, data=data, truncated=truncated)
+    return tool_result(not problems, summary, findings=findings, data=data, truncated=truncated)
+
+
+def _server_version_findings(core: dict[str, dict[str, Any]]) -> list[Finding]:
+    """Note when this server's bec_lib is a different major release than the services'."""
+    try:
+        own = metadata.version("bec_lib")
+    except metadata.PackageNotFoundError:
+        return []
+    theirs = sorted({entry["bec_lib"] for entry in core.values() if entry.get("bec_lib")})
+    if not theirs or all(version.split(".")[0] == own.split(".")[0] for version in theirs):
+        return []
+    return [
+        Finding(
+            "info",
+            "server_bec_version_differs",
+            f"This MCP server uses bec_lib {own} while the core services run "
+            f"{', '.join(theirs)}; answers about devices, scans and the queue may be incomplete",
+        )
+    ]
 
 
 def _status_summary(
