@@ -16,6 +16,7 @@ from bec_mcp_server.tools import (
     ToolContext,
     devices,
     health,
+    logs,
     queue_states,
     scans,
     status,
@@ -53,6 +54,7 @@ TIER_MODULES: dict[str, tuple[Any, ...]] = {
         devices,
         queue_states,
         scans,
+        logs,
     ),
 }
 # fmt: on
