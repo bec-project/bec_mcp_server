@@ -34,6 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "fakeredis>=2.23.2,~=2.23",
   "pylint>=3,<5",
   "pytest>=8,<10",
   "pytest-random-order~=1.1",
