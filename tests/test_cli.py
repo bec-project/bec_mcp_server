@@ -8,6 +8,7 @@ import threading
 import pytest
 
 from bec_mcp_server import cli
+from bec_mcp_server.bec.connection import DEFAULT_CLIENT_MAX_AGE_S, BecUnavailableError
 from bec_mcp_server.settings import DEFAULT_MAX_BEC_CALLS, DEFAULT_TOOL_TIMEOUT_S
 
 _ENV = (
@@ -139,7 +140,7 @@ def test_main_closes_the_app_when_the_transport_ends(monkeypatch):
         def close(self):
             events.append("close")
 
-    monkeypatch.setattr(cli, "build_app", lambda settings: _App())
+    monkeypatch.setattr(cli, "build_app", lambda settings, **kwargs: _App())
     monkeypatch.setattr(cli, "run", lambda app: events.append("run"))
     monkeypatch.setattr(cli, "_exit_if_stuck", lambda: events.append("exit-check"))
 
@@ -159,7 +160,7 @@ def test_main_closes_the_app_when_the_transport_fails(monkeypatch, error):
     def failing_run(app):
         raise error("stop")
 
-    monkeypatch.setattr(cli, "build_app", lambda settings: _App())
+    monkeypatch.setattr(cli, "build_app", lambda settings, **kwargs: _App())
     monkeypatch.setattr(cli, "run", failing_run)
     monkeypatch.setattr(cli, "_exit_if_stuck", lambda: None)
 
@@ -209,10 +210,107 @@ def test_sigterm_takes_the_ctrl_c_path(monkeypatch):
     def run_until_terminated(app):
         signal.raise_signal(signal.SIGTERM)
 
-    monkeypatch.setattr(cli, "build_app", lambda settings: _App())
+    monkeypatch.setattr(cli, "build_app", lambda settings, **kwargs: _App())
     monkeypatch.setattr(cli, "run", run_until_terminated)
     monkeypatch.setattr(cli, "_exit_if_stuck", lambda: None)
 
     cli.main(["--audit-log", "off"])
 
     assert closed == [True]
+
+
+# ---------------------------------------------------------------------------- BEC connection
+
+
+def _connection(argv):
+    args = cli.build_parser().parse_args(argv)
+    return cli.connection_from_args(args, cli.settings_from_args(args))
+
+
+def test_connection_defaults_leave_redis_to_bec_lib():
+    config = _connection([]).config
+    assert (config.host, config.port, config.username) == (None, None, None)
+    assert config.client_max_age_s == DEFAULT_CLIENT_MAX_AGE_S
+
+
+def test_connection_flags(tmp_path):
+    acl = tmp_path / "mcp_ro.env"
+    acl.write_text("REDIS_USER=mcp_ro\nREDIS_PASSWORD=pw\n", encoding="utf-8")
+    config = _connection(
+        [
+            "--redis",
+            "bec-host:6391",
+            "--config",
+            "/etc/bec/client.yaml",
+            "--acl-file",
+            str(acl),
+            "--client-max-age",
+            "0",
+        ]
+    ).config
+    assert (config.host, config.port) == ("bec-host", 6391)
+    assert config.service_config_path == "/etc/bec/client.yaml"
+    assert (config.username, config.password) == ("mcp_ro", "pw")
+    assert config.client_max_age_s == 0
+
+
+def test_connection_environment_and_flag_precedence(monkeypatch, tmp_path):
+    env_acl = tmp_path / "env.env"
+    env_acl.write_text("REDIS_USER=from_env\nREDIS_PASSWORD=a\n", encoding="utf-8")
+    flag_acl = tmp_path / "flag.env"
+    flag_acl.write_text("REDIS_USER=from_flag\nREDIS_PASSWORD=b\n", encoding="utf-8")
+    monkeypatch.setenv("BEC_REDIS_HOST", "env-host")
+    monkeypatch.setenv("BEC_REDIS_PORT", "6400")
+    monkeypatch.setenv("BEC_MCP_ACL_FILE", str(env_acl))
+    monkeypatch.setenv("BEC_MCP_CLIENT_MAX_AGE", "60")
+
+    config = _connection([]).config
+    assert (config.host, config.port, config.username, config.client_max_age_s) == (
+        "env-host",
+        6400,
+        "from_env",
+        60.0,
+    )
+
+    config = _connection(["--redis", "flag-host:6401", "--acl-file", str(flag_acl)]).config
+    assert (config.host, config.port, config.username) == ("flag-host", 6401, "from_flag")
+
+
+def test_main_hands_the_connection_to_the_app(monkeypatch):
+    received = {}
+
+    class _App:
+        def close(self):
+            pass
+
+    def fake_build_app(settings, *, connection=None):
+        received["connection"] = connection
+        return _App()
+
+    monkeypatch.setattr(cli, "build_app", fake_build_app)
+    monkeypatch.setattr(cli, "run", lambda app: None)
+    monkeypatch.setattr(cli, "_exit_if_stuck", lambda: None)
+
+    cli.main(["--audit-log", "off", "--redis", "bec-host:6391"])
+
+    assert received["connection"].redis_target == "bec-host:6391"
+    assert received["connection"].state()["state"] == "not_connected"
+
+
+def test_connect_on_startup_failure_exits_with_the_reason_and_closes(monkeypatch):
+    events = []
+
+    class _App:
+        def close(self):
+            events.append("close")
+
+    def refuse(self):
+        raise BecUnavailableError("Could not connect to BEC's Redis at bec-host:6391.")
+
+    monkeypatch.setattr(cli.BecConnection, "connect", refuse)
+    monkeypatch.setattr(cli, "build_app", lambda settings, **kwargs: _App())
+    monkeypatch.setattr(cli, "run", lambda app: events.append("run"))
+
+    with pytest.raises(SystemExit, match="cannot connect to BEC at startup: Could not connect"):
+        cli.main(["--audit-log", "off", "--connect-on-startup"])
+    assert events == ["close"]

@@ -161,6 +161,7 @@ def _isolated_bec_environment(monkeypatch, tmp_path):
         "BEC_MCP_LOG_DIR",
         "BEC_MCP_CLIENT_MAX_AGE",
         "BEC_MCP_REDIS_TIMEOUT",
+        "BEC_MCP_CONNECT_ON_STARTUP",
     ):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(connection_module, "DEFAULT_LOG_DIR", tmp_path / "logs")
