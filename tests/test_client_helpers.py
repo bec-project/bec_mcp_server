@@ -47,11 +47,7 @@ def test_summarize_scan_extracts_description_and_shape():
         },
     )
 
-    assert summary == {
-        "name": "line_scan",
-        "description": "Line scan",
-        "base_class": "ScanBaseV4",
-    }
+    assert summary == {"name": "line_scan", "description": "Line scan", "base_class": "ScanBaseV4"}
 
 
 def test_scan_details_extracts_full_scan_metadata():
@@ -109,13 +105,7 @@ def test_scans_excludes_internal_entries_by_default():
 
     assert result == {
         "count": 1,
-        "scans": [
-            {
-                "name": "line_scan",
-                "description": "Line scan",
-                "base_class": "ScanBaseV4",
-            }
-        ],
+        "scans": [{"name": "line_scan", "description": "Line scan", "base_class": "ScanBaseV4"}],
     }
 
 
@@ -132,13 +122,7 @@ def test_scans_support_prefix_and_base_class_filters():
 
     assert result == {
         "count": 1,
-        "scans": [
-            {
-                "name": "list_scan",
-                "description": "List",
-                "base_class": "ScanBase",
-            }
-        ],
+        "scans": [{"name": "list_scan", "description": "List", "base_class": "ScanBase"}],
     }
 
 
@@ -180,8 +164,4 @@ def test_scan_details_reports_missing_scan():
 
     result = connection.scan_details("grid_scan")
 
-    assert result == {
-        "found": False,
-        "scan_name": "grid_scan",
-        "available_scans": ["line_scan"],
-    }
+    assert result == {"found": False, "scan_name": "grid_scan", "available_scans": ["line_scan"]}
