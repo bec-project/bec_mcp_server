@@ -104,6 +104,7 @@ the outcome of every call, including calls to unknown tools or with invalid argu
 | `bec_scans` | The scans this BEC instance offers, each with a one-line description |
 | `bec_scan_help` | How to run one scan: its arguments with types, units, bounds and defaults, and an example call built from its signature with the session's own motors |
 | `bec_scan_history` | The latest finished scans with number, status and duration, and findings for scans that did not close cleanly; file paths are for the user |
+| `bec_logs` | Recent log records filtered by service, minimum level, text and time window, with repeats collapsed into counts and alarms merged into one list with findings |
 
 Every tool answers with the same top-level keys: `ok`, `summary`, `findings`, `data` and
 `truncated`. When BEC is unreachable, `bec_ping` and `bec_status` answer `ok: false` with the

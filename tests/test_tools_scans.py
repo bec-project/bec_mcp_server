@@ -331,11 +331,10 @@ def test_scan_history_reports_scans_that_did_not_close_cleanly():
     result = scans.scan_history_digest(make_client(history=history), now=1_791_400_620.0)
 
     assert result["findings"] == [
-        "Warning: Scan 5 (line_scan) ended halted. "
-        'Next: bec_logs(min_level="warning", minutes=11).',
+        'Warning: Scan 5 (line_scan) ended halted. Next: bec_logs(level="warning", minutes=11).',
         "Info: Scan 4 (line_scan) was halted by a user.",
         "Warning: Scan 2 (line_scan) ended aborted after an alarm. "
-        'Next: bec_logs(min_level="warning", minutes=11).',
+        'Next: bec_logs(level="warning", minutes=11).',
     ]
     assert [finding["code"] for finding in result["data"]["findings"]] == [
         "scan_not_closed",

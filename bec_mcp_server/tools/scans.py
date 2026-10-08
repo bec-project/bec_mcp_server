@@ -468,7 +468,7 @@ def _history_finding(msg: Any, now: float) -> Finding | None:
         f"Scan {number} ({name}) ended {status}{cause}.",
         subject=subject,
         next_tool="bec_logs",
-        next_args={"min_level": "warning", "minutes": minutes},
+        next_args={"level": "warning", "minutes": minutes},
     )
 
 
