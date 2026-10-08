@@ -11,7 +11,15 @@ from mcp.server.mcpserver import MCPServer
 from bec_mcp_server.audit import AuditLog, AuditMiddleware
 from bec_mcp_server.runtime import Runtime
 from bec_mcp_server.settings import Settings
-from bec_mcp_server.tools import Connection, ToolContext, devices, health, queue_states, status
+from bec_mcp_server.tools import (
+    Connection,
+    ToolContext,
+    devices,
+    health,
+    queue_states,
+    scans,
+    status,
+)
 
 SERVER_NAME = "bec"
 
@@ -44,6 +52,7 @@ TIER_MODULES: dict[str, tuple[Any, ...]] = {
         status,
         devices,
         queue_states,
+        scans,
     ),
 }
 # fmt: on
