@@ -1,0 +1,24 @@
+# aclfile line for the MCP server's own Redis account in diagnose mode (Redis 7 or newer).
+# Replace <SHA256-OF-PASSWORD>: aclfiles need hashed passwords,
+#   echo -n 'the-password' | shasum -a 256
+#
+# Derived from what a bec_lib 4.1 BECClient executes, and checked against ACL LOG on a BEC 4.1
+# stack with no denials:
+# - %R~info/* %R~public/* %R~user/*   read access to BEC's endpoint prefixes; the prefix is the
+#                                      ACL boundary (bec_lib/endpoints.py)
+# - %W~user/services/*                 the client's own status and metrics (SET with EXPIRE)
+# - %W~user/log                        bec_logger appends log records to this stream (XADD)
+# - +@read +keys                       cached reads; bec_lib lists services with KEYS
+# - +set +expire +xadd +multi +exec    the only writes the client makes, confined to the %W~ keys
+# - +acl|whoami                        BECClient reads its own account name at start
+# - &* +@pubsub -publish -spublish     subscribe to any channel, publish to none...
+# - (+publish &user/services/*)        ...except the client's own status channels.
+#
+# PUBLISH must stay limited: BEC 4 takes scan requests as PUBLISH on
+# personal/<user>/queue/queue_request and queue aborts and halts on
+# user/queue/queue_modification_request. With &* and an unrestricted +publish this account could
+# submit scans as any user or stop the queue. With this line both get NOPERM.
+#
+# After deploying, start the server with this account and check `redis-cli ACL LOG` for
+# denials; extend the grant only for what a new bec_lib release needs.
+user mcp_ro on #<SHA256-OF-PASSWORD> %R~info/* %R~public/* %R~user/* %W~user/services/* %W~user/log &* +@read +@connection +@pubsub -publish -spublish +keys +set +expire +xadd +multi +exec +acl|whoami (+publish &user/services/*)
