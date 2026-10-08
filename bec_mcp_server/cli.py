@@ -178,6 +178,13 @@ def build_parser() -> argparse.ArgumentParser:
         f"only grow (default {DEFAULT_CLIENT_MAX_AGE_S:.0f}; 0 never restarts). "
         "[BEC_MCP_CLIENT_MAX_AGE]",
     )
+    parser.add_argument(
+        "--docs-index",
+        default=env_optional("BEC_MCP_DOCS_INDEX"),
+        metavar="PATH_OR_URL",
+        help="Docs search index built from bec_docs (a .json or .json.gz file, or an http(s) URL); "
+        "the index bundled with the server is used when unset or unreadable. [BEC_MCP_DOCS_INDEX]",
+    )
     return parser
 
 
@@ -217,6 +224,7 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
         max_bec_calls=args.max_bec_calls,
         audit_log=resolve_audit_log(args.audit_log),
         log_level=args.log_level.upper(),
+        docs_index=args.docs_index,
     )
 
 

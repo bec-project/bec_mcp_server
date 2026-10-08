@@ -13,9 +13,9 @@ Transport = Literal["stdio", "streamable-http"]
 TRANSPORTS: tuple[str, ...] = ("stdio", "streamable-http")
 
 #: server modes and the capability tiers each one exposes; tools are labeled by tier and
-#: graduate by re-labeling, never by renaming. v1 ships diagnose only: the docs tier joins as
-#: "learn" once docs search lands, write tiers come back later behind their own Redis account
-MODE_TIERS: dict[str, frozenset[str]] = {"diagnose": frozenset({"diagnose"})}
+#: graduate by re-labeling, never by renaming. v1 ships diagnose only, which includes the "learn"
+#: tier (docs search); write tiers come back later behind their own Redis account
+MODE_TIERS: dict[str, frozenset[str]] = {"diagnose": frozenset({"diagnose", "learn"})}
 
 LOG_LEVELS: tuple[str, ...] = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
@@ -56,6 +56,8 @@ class Settings:
     max_bec_calls: int = DEFAULT_MAX_BEC_CALLS
     audit_log: Path | None = None
     log_level: str = "INFO"
+    #: path or http(s) URL of the docs index; None serves the index bundled with the package
+    docs_index: str | None = None
 
     def __post_init__(self) -> None:
         if self.transport not in TRANSPORTS:
