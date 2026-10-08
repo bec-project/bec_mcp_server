@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable, Iterable, Literal, Protocol
 
 from mcp_types import ToolAnnotations
 
+from bec_mcp_server.docs.search import DocsIndex
 from bec_mcp_server.runtime import Runtime
 from bec_mcp_server.settings import Settings
 
@@ -51,6 +52,8 @@ class ToolContext:
     settings: Settings
     runtime: Runtime
     connection: Connection | None
+    #: the docs search index; None when the mode has no learn tier
+    docs: DocsIndex | None = None
 
     async def bec_call(self, func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         """Run blocking BEC work on the BEC pool, bounded by the per-call deadline.
