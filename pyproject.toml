@@ -5,25 +5,66 @@ build-backend = "hatchling.build"
 [project]
 name = "bec-mcp-server"
 version = "0.1.0"
-description = "A very small MCP server for inspecting BEC state"
+description = "A read-only MCP server for diagnosing a running BEC instance"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-  "bec-lib>=3.0",
-  "mcp>=1.0",
-  "uvicorn>=0.30",
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Physics",
 ]
+# BECClient.start() imports bec_ipython_client, so it is a runtime dependency even though
+# this package never imports it directly. The mcp ceiling stays until the server moves off
+# mcp.server.fastmcp, which mcp 2.0 removed.
+dependencies = ["bec-lib>=4.0", "bec-ipython-client>=4.0", "mcp>=1.8,<2"]
 
 [project.optional-dependencies]
 dev = [
+  "black~=26.0",
+  "isort>=5.13.2,~=5.13",
+  "pylint>=3,<5",
   "pytest>=8,<10",
+  "pytest-random-order~=1.1",
 ]
 
 [project.scripts]
 bec-mcp-server = "bec_mcp_server.server:main"
 
 [tool.hatch.build.targets.wheel]
-include = ["*"]
+packages = ["bec_mcp_server"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.black]
+line-length = 100
+skip-magic-trailing-comma = true
+
+[tool.isort]
+line_length = 100
+profile = "black"
+multi_line_output = 3
+include_trailing_comma = true
+
+[tool.pylint.main]
+fail-under = 9.0
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint."messages control"]
+disable = [
+  "missing-module-docstring",
+  "missing-class-docstring",
+  "logging-fstring-interpolation",
+  "line-too-long",
+  "too-many-instance-attributes",
+  "wrong-import-order",
+]
