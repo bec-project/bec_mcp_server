@@ -21,9 +21,16 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Physics",
 ]
 # BECClient.start() imports bec_ipython_client, so it is a runtime dependency even though
-# this package never imports it directly. The mcp ceiling stays until the server moves off
-# mcp.server.fastmcp, which mcp 2.0 removed.
-dependencies = ["bec-lib>=4.0", "bec-ipython-client>=4.0", "mcp>=1.8,<2"]
+# this package never imports it directly. The server is written against the mcp 2.x API
+# (MCPServer, server middleware, TransportSecuritySettings) and tested on 2.3; server middleware
+# is still provisional within 2.x, which tests/test_audit.py guards.
+dependencies = [
+  "anyio>=4.9",
+  "bec-lib>=4.0",
+  "bec-ipython-client>=4.0",
+  "mcp>=2.3,<3",
+  "uvicorn>=0.31.1",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -35,7 +42,7 @@ dev = [
 ]
 
 [project.scripts]
-bec-mcp-server = "bec_mcp_server.server:main"
+bec-mcp-server = "bec_mcp_server.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["bec_mcp_server"]
