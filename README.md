@@ -103,6 +103,9 @@ the outcome of every call, including calls to unknown tools or with invalid argu
 | `mcp_status` | Whether the server is up: version, transport, mode, uptime, BEC connection state and client age, and recent failed calls |
 | `bec_ping` | Whether BEC's Redis answers, the round trip in ms, and how many services and clients publish a status |
 | `bec_status` | Whether BEC is healthy: each core service's status, version, host, CPU and memory, plus other services and clients |
+| `bec_scans` | The scans this BEC instance offers, each with a one-line description |
+| `bec_scan_help` | How to run one scan: its arguments with types, units, bounds and defaults, and an example call built from its signature with the session's own motors |
+| `bec_scan_history` | The latest finished scans with number, status and duration, and findings for scans that did not close cleanly; file paths are for the user |
 
 Every tool answers with the same top-level keys: `ok`, `summary`, `findings`, `data` and
 `truncated`. When BEC is unreachable, `bec_ping` and `bec_status` answer `ok: false` with the
