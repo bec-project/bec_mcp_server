@@ -11,7 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from bec_mcp_server.audit import AuditLog, AuditMiddleware
 from bec_mcp_server.runtime import Runtime
 from bec_mcp_server.settings import Settings
-from bec_mcp_server.tools import Connection, ToolContext, health, status
+from bec_mcp_server.tools import Connection, ToolContext, devices, health, status
 
 SERVER_NAME = "bec"
 
@@ -42,6 +42,7 @@ MODE_NOTES = {"diagnose": DIAGNOSE_MODE_NOTE}
 TIER_MODULES: dict[str, tuple[Any, ...]] = {
     "diagnose": (
         status,
+        devices,
     ),
 }
 # fmt: on
