@@ -40,12 +40,14 @@ redis-cli --user mcp_ro --pass CHANGE-ME SET user/queue/anything 1
 
 ## Handing it to the server
 
-Write the credentials to an env file only the service user can read. The format is the
-`.bec_acl.env` convention of the auto-deployed BEC services:
+Write the credentials to an env file that only root and the service can read. The format is the
+`.bec_acl.env` convention of the auto-deployed BEC services; step 3 of
+[`../README.md`](../README.md#3-write-the-token-and-the-redis-credentials) writes it for the
+`bec-mcp` service:
 
-```bash
-install -m 600 /dev/null /etc/bec-mcp/mcp_ro.env
-printf 'REDIS_USER=mcp_ro\nREDIS_PASSWORD=CHANGE-ME\n' > /etc/bec-mcp/mcp_ro.env
+```text
+REDIS_USER=mcp_ro
+REDIS_PASSWORD=<the password>
 ```
 
 Point the server at it with `--acl-file /etc/bec-mcp/mcp_ro.env` or

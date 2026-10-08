@@ -44,6 +44,9 @@ server accepts only the `Host` headers it knows: loopback names, the bind addres
 `--allowed-hosts` adds. Anything else gets `421 Invalid Host header`, which protects against DNS
 rebinding.
 
+To run the server as a service on a beamline host, with agents such as Claude Code, qwen-code or an
+Ollama model in podman containers, follow [deploy/README.md](deploy/README.md).
+
 ### Connecting to BEC
 
 The server starts its `BECClient` on the first tool call, so it answers even while BEC is down.
