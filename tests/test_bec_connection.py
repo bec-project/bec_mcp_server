@@ -32,29 +32,43 @@ def test_client_starts_lazily_once_and_is_reused(make_connection):
     assert connection.state()["client_starts"] == 1
 
 
-def test_redis_retries_are_disabled_after_start(make_connection):
-    connection = make_connection()
-    with connection.use() as client:
-        assert client.connector.retry_enabled == [False]
+class RecordingRedis:
+    """Stand-in for redis.Redis that records what the connector configures."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.retry = kwargs["retry"]
+
+    def pubsub(self):
+        return type("PubSub", (), {"ignore_subscribe_messages": False})()
+
+    def get_retry(self):
+        return self.retry
+
+    def set_retry(self, retry):
+        self.retry = retry
 
 
-def test_client_gets_a_connector_with_socket_timeouts(make_connection):
-    connection = make_connection(BecConnectionConfig(host="localhost", redis_timeout_s=2.5))
+def _connector(make_connection, **config):
+    connection = make_connection(BecConnectionConfig(host="localhost", **config))
     connection.connect()
     connector_cls = connection.factory.connector_classes[0]
+    return connector_cls("localhost:1", redis_cls=RecordingRedis, name="test")
 
-    captured = {}
 
-    class RecordingRedis:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
+def test_client_connector_has_socket_timeouts(make_connection):
+    connector = _connector(make_connection, redis_timeout_s=2.5)
+    redis = connector._managed_connection._redis_conn
+    assert redis.kwargs["socket_connect_timeout"] == 2.5
+    assert redis.kwargs["socket_timeout"] == 2.5
 
-        def pubsub(self):
-            return type("PubSub", (), {"ignore_subscribe_messages": False})()
 
-    connector_cls("localhost:1", redis_cls=RecordingRedis, name="test")
-    assert captured["socket_connect_timeout"] == 2.5
-    assert captured["socket_timeout"] == 2.5
+def test_client_connector_never_enables_redis_retries(make_connection):
+    # BECService switches retries on after start; with them, a lost Redis blocks the client's
+    # stream thread for minutes
+    connector = _connector(make_connection)
+    connector.set_retry_enabled(True)
+    assert connector._managed_connection._redis_conn.get_retry().get_retries() == 0
 
 
 def test_swallowed_start_failure_raises_a_clear_error_and_leaves_no_client(make_connection):
