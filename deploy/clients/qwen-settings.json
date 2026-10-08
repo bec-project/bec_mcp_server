@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "bec": {
+      "httpUrl": "$BEC_MCP_URL",
+      "headers": {
+        "Authorization": "Bearer $BEC_MCP_TOKEN"
+      },
+      "timeout": 60000,
+      "trust": true
+    }
+  }
+}

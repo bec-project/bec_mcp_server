@@ -1,0 +1,7 @@
+{
+  "enabledMcpjsonServers": ["bec"],
+  "permissions": {
+    "allow": ["mcp__bec"],
+    "deny": ["Bash", "WebFetch", "WebSearch"]
+  }
+}
