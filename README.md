@@ -44,6 +44,27 @@ server accepts only the `Host` headers it knows: loopback names, the bind addres
 `--allowed-hosts` adds. Anything else gets `421 Invalid Host header`, which protects against DNS
 rebinding.
 
+### Connecting to BEC
+
+The server starts its `BECClient` on the first tool call, so it answers even while BEC is down.
+Without `--redis` or `--config` it finds Redis like any other BEC client: `BEC_SERVICE_CONFIG`,
+then the deployment config, then `localhost:6379`.
+
+```bash
+bec-mcp-server --redis localhost:6379                       # a local BEC
+bec-mcp-server --config /path/to/bec_config.yaml            # the deployment's service config
+bec-mcp-server --acl-file /etc/bec-mcp/mcp_ro.env           # the server's own Redis account
+```
+
+On a deployment with Redis ACLs, give the server its own restricted account; see
+[deploy/acl/README.md](deploy/acl/README.md). If Redis refuses that account, the server reports it
+instead of silently using the `default` user.
+
+A lost Redis makes calls fail within seconds instead of hanging: the client's Redis connections
+time out after `BEC_MCP_REDIS_TIMEOUT` seconds (default 5) and never retry, and the next call
+starts a fresh client. The client also restarts after `--client-max-age`, because some of its
+internal structures only grow; `mcp_status` shows its age.
+
 Every option can also be set through the environment:
 
 | Option | Variable | Default | Meaning |
@@ -61,6 +82,13 @@ Every option can also be set through the environment:
 | `--max-bec-calls` | `BEC_MCP_MAX_BEC_CALLS` | `8` | Tool calls that may wait on BEC at once |
 | `--audit-log` | `BEC_MCP_AUDIT_LOG` | `~/.local/state/bec-mcp-server/audit.jsonl` | One JSON line per tool call; `off` disables it |
 | `--log-level` | `BEC_MCP_LOG_LEVEL` | `INFO` | Server log level; logs go to stderr |
+| `--redis` | `BEC_REDIS_HOST`, `BEC_REDIS_PORT` | from the BEC config | BEC's Redis as `HOST:PORT` |
+| `--config` | `BEC_MCP_SERVICE_CONFIG` | unset | BEC service config YAML |
+| `--acl-file` | `BEC_MCP_ACL_FILE` | unset | Env file with `REDIS_USER` and `REDIS_PASSWORD` (or `BEC_REDIS_USERNAME` and `BEC_REDIS_PASSWORD`) |
+| `--connect-on-startup` | `BEC_MCP_CONNECT_ON_STARTUP` | off | Connect before serving and exit if BEC is unreachable |
+| `--client-max-age` | `BEC_MCP_CLIENT_MAX_AGE` | `21600` | Seconds before the BEC client is restarted; `0` never |
+| | `BEC_MCP_REDIS_TIMEOUT` | `5` | Seconds before a Redis connect or reply gives up |
+| | `BEC_MCP_LOG_DIR` | `~/.cache/bec-mcp-server/logs` | bec_lib's log files, unless the service config sets them |
 
 Each tool call runs on a worker thread with a deadline, so a wedged Redis turns into an error
 message instead of a hung session. The audit log records the tool, its arguments, the duration and
@@ -70,10 +98,13 @@ the outcome of every call, including calls to unknown tools or with invalid argu
 
 | Tool | Returns |
 | --- | --- |
-| `mcp_status` | Whether the server is up: version, transport, mode, uptime, BEC connection state and recent failed calls |
+| `mcp_status` | Whether the server is up: version, transport, mode, uptime, BEC connection state and client age, and recent failed calls |
+| `bec_ping` | Whether BEC's Redis answers, the round trip in ms, and how many services and clients publish a status |
+| `bec_status` | Whether BEC is healthy: each core service's status, version, host, CPU and memory, plus other services and clients |
 
 Every tool answers with the same top-level keys: `ok`, `summary`, `findings`, `data` and
-`truncated`. The BEC tools arrive in the next steps of the v1 plan.
+`truncated`. When BEC is unreachable, `bec_ping` and `bec_status` answer `ok: false` with the
+reason rather than failing.
 
 ## Documentation search
 
