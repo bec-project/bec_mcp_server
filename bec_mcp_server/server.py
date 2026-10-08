@@ -27,6 +27,7 @@ def build_server(
     streamable_http_path: str = "/mcp",
     connect_on_startup: bool = True,
 ) -> FastMCP:
+    """Create the MCP server and register the read-only BEC tools."""
     mcp = FastMCP("bec", host=host, port=port, streamable_http_path=streamable_http_path)
     bec = BecConnection()
     if connect_on_startup:
@@ -110,6 +111,7 @@ def build_server(
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments, taking defaults from BEC_MCP_* environment variables."""
     parser = argparse.ArgumentParser(description="Run the BEC MCP server.")
     parser.add_argument(
         "--transport",
@@ -142,6 +144,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Entry point of the bec-mcp-server console script."""
     args = parse_args(argv)
     mcp = build_server(
         host=args.host,
