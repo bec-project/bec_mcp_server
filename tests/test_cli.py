@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 import threading
 
 import pytest
@@ -122,6 +123,13 @@ def test_deployment_typos_exit_with_a_readable_message(monkeypatch, variable, va
         cli.parse_args([])
 
 
+@pytest.fixture(autouse=True)
+def _restore_sigterm():
+    previous = signal.getsignal(signal.SIGTERM)
+    yield
+    signal.signal(signal.SIGTERM, previous)
+
+
 def test_main_closes_the_app_when_the_transport_ends(monkeypatch):
     events = []
 
@@ -189,3 +197,22 @@ def test_exit_check_exits_when_a_thread_stays_blocked(monkeypatch):
         worker.join()
 
     assert exits == [0]
+
+
+def test_sigterm_takes_the_ctrl_c_path(monkeypatch):
+    closed = []
+
+    class _App:
+        def close(self):
+            closed.append(True)
+
+    def run_until_terminated(app):
+        signal.raise_signal(signal.SIGTERM)
+
+    monkeypatch.setattr(cli, "build_app", lambda settings: _App())
+    monkeypatch.setattr(cli, "run", run_until_terminated)
+    monkeypatch.setattr(cli, "_exit_if_stuck", lambda: None)
+
+    cli.main(["--audit-log", "off"])
+
+    assert closed == [True]

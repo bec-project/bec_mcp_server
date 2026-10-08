@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 
@@ -53,3 +54,40 @@ def test_stdio_server_exits_when_its_input_closes(tmp_path):
     assert process.returncode == 0, err.decode()
     # nothing but protocol messages may reach stdout, and there were none to send
     assert out == b""
+
+
+def test_http_server_shuts_down_cleanly_on_sigterm(tmp_path):
+    token_file = tmp_path / "token"
+    token_file.write_text("t0ken\n", encoding="utf-8")
+    env = _server_env(tmp_path)
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "bec_mcp_server",
+            "--transport",
+            "streamable-http",
+            "--port",
+            "0",
+            "--token-file",
+            str(token_file),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    try:
+        for line in process.stderr:
+            if b"Uvicorn running" in line:
+                break
+        process.send_signal(signal.SIGTERM)
+        process.wait(timeout=30)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.stdout.close()
+        process.stderr.close()
+
+    # 0, not -15: SIGTERM ran the normal shutdown path instead of killing the process
+    assert process.returncode == 0

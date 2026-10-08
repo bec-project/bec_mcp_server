@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import signal
 import threading
 import time
 
@@ -177,6 +178,10 @@ def run(app: BecMcpApp) -> None:
 def main(argv: list[str] | None = None) -> None:
     """Entry point of the bec-mcp-server command."""
     settings = parse_args(argv)
+    # SIGTERM (systemd stop, podman stop, an MCP client ending the session) must take the same
+    # path as Ctrl-C: uvicorn re-raises the signal after its graceful shutdown, and with the
+    # default handler the process would die there without closing the BEC connection
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     app = build_app(settings)
     try:
         run(app)
