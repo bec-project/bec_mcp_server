@@ -325,10 +325,7 @@ class BecConnection:
         # The start lock is held from here on, so only shutdown() and finishing calls change
         # the state concurrently; neither can install or remove a client.
         try:
-            retire = self._take_client_due_for_restart()
-            if retire is not None:
-                logger.info("restarting the BEC client: %s", self._last_restart_reason)
-                self._safe_shutdown(retire)
+            self._restart_if_due()
             with self._state_lock:
                 if self._closed:
                     raise BecUnavailableError("the BEC connection has been shut down")
@@ -353,19 +350,33 @@ class BecConnection:
         finally:
             self._start_lock.release()
 
-    def _take_client_due_for_restart(self) -> Any:
-        """Detach the client if it is due for a restart and no call is using it."""
+    def _restart_if_due(self) -> None:
+        """Replace the client if it is due for a restart and no call is using it.
+
+        Called with the start lock held, so no other call can install or remove a client.
+        """
         with self._state_lock:
-            if self._client is None or self._in_flight:
+            client = self._client
+            if client is None or self._in_flight:
                 # a busy client restarts on the first call that finds it idle
-                return None
+                return
             reason = self._restart_due_locked()
-            if reason is None:
-                return None
-            client, self._client = self._client, None
+            broken = self._restart_reason is not None
+        if reason is None:
+            return
+        if broken and not self._connector_alive(client):
+            # Redis is still gone: shutting the client down and starting a new one would each
+            # wait on it again, so keep the broken client until Redis answers
+            raise self._fail(
+                f"BEC's Redis at {self.redis_target} still does not answer. Check that BEC and "
+                "its Redis are running. The next call tries again."
+            )
+        with self._state_lock:
+            self._client = None
             self._started_at = None
             self._last_restart_reason = reason
-            return client
+        logger.info("restarting the BEC client: %s", reason)
+        self._safe_shutdown(client)
 
     def _restart_due_locked(self) -> str | None:
         if self._restart_reason is not None:
