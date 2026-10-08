@@ -48,6 +48,7 @@ def stdout_guard(capfd):
 
     return guard
 
+
 class FakeConnector:
     def __init__(self, *, alive: bool = True, username: str = "default") -> None:
         self.alive = alive
