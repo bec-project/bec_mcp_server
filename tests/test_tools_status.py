@@ -139,6 +139,16 @@ def test_mixed_core_versions_are_a_finding(make_connection):
     assert "ScanServer 4.1.4" in result["findings"][0]
 
 
+def test_other_bec_major_release_is_an_info_finding(make_connection):
+    statuses = _healthy_statuses(**{name: _status(name, bec_lib="3.165.1") for name in CORE})
+    result = status_tools.status(_connection(make_connection, statuses))
+    # BEC itself is healthy; the note is about this server
+    assert result["ok"] is True
+    assert result["summary"].startswith("BEC is healthy")
+    assert result["findings"][0].startswith("Info: This MCP server uses bec_lib 4.")
+    assert "3.165.1" in result["findings"][0]
+
+
 def test_long_client_lists_are_capped(make_connection):
     statuses = _healthy_statuses()
     for index in range(30):
