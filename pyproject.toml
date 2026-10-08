@@ -46,6 +46,7 @@ e2e = ["bec-server>=4.0", "pytest-bec-e2e>=4.0", "pytest-timeout>=2"]
 
 [project.scripts]
 bec-mcp-server = "bec_mcp_server.cli:main"
+bec-mcp-build-docs-index = "bec_mcp_server.docs.build:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["bec_mcp_server"]
