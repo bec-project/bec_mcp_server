@@ -16,8 +16,9 @@ local model and that sees nothing but the server's tools.
 1. **Every tool is read-only.** No tool may move a device, submit, abort or modify a scan, change a
    device configuration, or restart a service. Register every tool with the `READ_ONLY_TOOL`
    annotations. Write tools are out of scope for v1.
-2. **BEC is reached only through the server's single `BECClient`**, held by the server's BEC
-   connection. Never create a second client, a second connector, or a `redis` client of your own.
+2. **BEC is reached only through the server's single `BECClient`**, held by `BecConnection` in
+   `bec/connection.py`. Never create a second client, a second connector, or a `redis` client of
+   your own.
    Reads that have no public client accessor go through that client's own connector with
    `MessageEndpoints`; whether those count as "through the client" is still an open question for v1.
 3. **Read cached state only.** In `bec_lib`, `read()` and `get()` default to `cached=False`, which
@@ -45,6 +46,7 @@ local model and that sees nothing but the server's tools.
 | `bec_mcp_server/transport.py` | stdio and streamable HTTP: bearer token, allowed hosts and origins. |
 | `bec_mcp_server/runtime.py` | Worker offload with deadlines and bounded pools, call statistics. |
 | `bec_mcp_server/audit.py` | The per-call JSONL audit log, observed at the protocol boundary. |
+| `bec_mcp_server/bec/` | `connection.py`: `BecConnection`, the one `BECClient` (lazy start, checks, restarts, shutdown); tools borrow it with `with connection.use() as client`. `digest.py`: JSON-safe digests of BEC values. `compat.py`: the only place for private `bec_lib` attributes. |
 | `bec_mcp_server/tools/` | Tool modules, each with `register(server, connection, call)`, listed per tier in `app.TIER_MODULES`; `__init__.py` holds `READ_ONLY_TOOL`, `Finding` and `tool_result()`. |
 | `tests/` | Unit tests. They run against fakes and never need a running BEC or Redis. |
 | `docs/decisions/` | Decision records, numbered `NNNN-<slug>.md`. |
