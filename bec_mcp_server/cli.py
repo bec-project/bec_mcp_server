@@ -30,6 +30,7 @@ from bec_mcp_server.settings import (
     env_int,
     env_optional,
     env_str,
+    parse_code_roots,
     parse_host_list,
     parse_origin_list,
     resolve_audit_log,
@@ -74,7 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mode",
         default=env_str("BEC_MCP_MODE", "diagnose"),
-        help=f"Tool set to serve: {', '.join(MODE_TIERS)}. [BEC_MCP_MODE]",
+        help=f"Tool set to serve: {', '.join(MODE_TIERS)}. diagnose (default) never sees source "
+        "code; code adds read-only tools that resolve tracebacks to the source below --code-root. "
+        "[BEC_MCP_MODE]",
     )
     parser.add_argument(
         "--token-file",
@@ -197,6 +200,21 @@ def build_parser() -> argparse.ArgumentParser:
         "(default: the index the bec_docs deploy publishes, "
         "https://bec-project.github.io/bec_docs/bec_docs_index.json.gz). [BEC_MCP_DOCS_INDEX]",
     )
+    code = parser.add_argument_group(
+        "Code mode",
+        "Off by default. With --mode code the agent may read Python source below the "
+        "directories given here, and nowhere else, to explain tracebacks.",
+    )
+    code.add_argument(
+        "--code-root",
+        action="append",
+        default=None,
+        metavar="[LABEL=]DIR",
+        help="A directory code mode may read below, e.g. a BEC checkout or the site-packages "
+        "of the venv BEC runs from; repeat it or separate entries with commas. The agent sees "
+        "each one only by its label, which defaults to the directory name. "
+        "[BEC_MCP_CODE_ROOTS, comma-separated]",
+    )
     return parser
 
 
@@ -237,6 +255,9 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
         audit_log=resolve_audit_log(args.audit_log),
         log_level=args.log_level.upper(),
         docs_index=args.docs_index,
+        code_roots=parse_code_roots(
+            args.code_root or [env_str("BEC_MCP_CODE_ROOTS", "")], option="--code-root"
+        ),
     )
 
 

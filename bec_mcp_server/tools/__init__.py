@@ -8,7 +8,9 @@ a blocking function on the BEC worker pool under the per-call deadline; the serv
 
 from __future__ import annotations
 
+import contextvars
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable, Literal, Protocol
 
@@ -17,6 +19,9 @@ from mcp_types import ToolAnnotations
 from bec_mcp_server.docs.search import DocsIndex
 from bec_mcp_server.runtime import Runtime
 from bec_mcp_server.settings import Settings
+from bec_mcp_server.source.roots import SourceTree
+
+logger = logging.getLogger(__name__)
 
 #: every v1 tool reads cached state; MCP clients use this to skip permission prompts
 READ_ONLY_TOOL = ToolAnnotations(
@@ -54,6 +59,8 @@ class ToolContext:
     connection: Connection | None
     #: the docs search index; None when the mode has no learn tier
     docs: DocsIndex | None = None
+    #: the source roots code mode reads; None in every other mode
+    code: SourceTree | None = None
 
     async def bec_call(self, func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         """Run blocking BEC work on the BEC pool, bounded by the per-call deadline.
@@ -109,6 +116,13 @@ class Finding:
         }
 
 
+#: in code mode, a function that adds findings to an answer showing a Python traceback; set for
+#: each tool call by code mode's middleware, so no other mode runs it
+ANSWER_HOOK: contextvars.ContextVar[Callable[[dict[str, Any]], list[Finding]] | None] = (
+    contextvars.ContextVar("bec_mcp_answer_hook", default=None)
+)
+
+
 def tool_result(
     ok: bool,
     summary: str,
@@ -124,6 +138,13 @@ def tool_result(
     """
     findings = list(findings)
     data = dict(data or {})
+    hook = ANSWER_HOOK.get()
+    if hook is not None:
+        try:
+            findings.extend(hook(data))
+        # an extra hint must never cost the agent the answer itself
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.warning("answer hook failed", exc_info=True)
     structured = [finding.as_dict() for finding in findings if isinstance(finding, Finding)]
     if structured:
         data["findings"] = structured
