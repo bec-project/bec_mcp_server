@@ -12,6 +12,7 @@ from bec_lib.endpoints import MessageEndpoints
 from louie import saferef
 
 from bec_mcp_server.bec.connection import BecConnection, BecConnectionConfig
+from bec_mcp_server.bec.log_cache import DEFAULT_LOG_CACHE_SIZE
 
 NOW = 1_800_000_000.0
 LEVEL_NO = {
@@ -131,7 +132,7 @@ def stream_client(stream=(), alarms=(), *, connector: StreamConnector | None = N
     )
 
 
-def connection_for(client, *, log_cache_size: int = 3000) -> BecConnection:
+def connection_for(client, *, log_cache_size: int = DEFAULT_LOG_CACHE_SIZE) -> BecConnection:
     """A real BecConnection (lazy start, log cache, error mapping) whose client is the fake."""
     return BecConnection(
         BecConnectionConfig(log_cache_size=log_cache_size),

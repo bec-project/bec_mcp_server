@@ -398,7 +398,7 @@ def test_analysis_and_range_through_the_app_on_the_cache(call_tool, stdout_guard
     assert around["data"]["records"][-1]["message"] == "after the analysis"
     assert around["data"]["records"][-1]["id"] == len(LIMIT_FAILURE) + 1
     # the cache seeded once; the second call read no stream
-    assert client.connector.get_last_calls == [3000]
+    assert client.connector.get_last_calls == [10_000]
     connection.shutdown()
 
 

@@ -322,7 +322,7 @@ def test_connect_on_startup_failure_exits_with_the_reason_and_closes(monkeypatch
 
 
 def test_log_cache_size_from_flag_and_environment(monkeypatch):
-    assert _connection([]).config.log_cache_size == DEFAULT_LOG_CACHE_SIZE
+    assert _connection([]).config.log_cache_size == DEFAULT_LOG_CACHE_SIZE == 10_000
     assert _connection(["--log-cache-size", "0"]).config.log_cache_size == 0
     assert _connection(["--log-cache-size", "0"]).log_cache is None
     monkeypatch.setenv("BEC_MCP_LOG_CACHE_SIZE", "500")

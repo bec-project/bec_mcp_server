@@ -71,10 +71,11 @@ internal structures only grow; `mcp_status` shows its age.
 ### The log cache
 
 BEC services and clients publish their log records to one Redis stream, which bec_lib trims to
-about 10,000 records. The server keeps its own copy of the newest records, 3000 by default
-(`--log-cache-size`). When the server starts it connects to BEC in the background, seeds the cache
-from the stream, and from then on bec_lib's own stream thread delivers every new record, so
-following the stream costs no tool call and no worker slot. Each record gets an id, counted from 1
+about 10,000 records. The server keeps its own copy of the newest records, as many as the stream
+holds by default (`--log-cache-size`), so the cache reaches back at least as far as Redis. When
+the server starts it connects to BEC in the background, seeds the cache from the stream, and from
+then on bec_lib's own stream thread delivers every new record, so following the stream costs no
+tool call and no worker slot. Each record gets an id, counted from 1
 since the server started, which the log tools use to refer to records. The cache carries over
 client restarts without losing or repeating records, and while BEC is unreachable the log tools
 still serve what it held. `mcp_status` shows its state under `bec.log_cache`; `0` turns it off, and
@@ -102,7 +103,7 @@ Every option can also be set through the environment:
 | `--acl-file` | `BEC_MCP_ACL_FILE` | unset | Env file with `REDIS_USER` and `REDIS_PASSWORD` (or `BEC_REDIS_USERNAME` and `BEC_REDIS_PASSWORD`) |
 | `--connect-on-startup` | `BEC_MCP_CONNECT_ON_STARTUP` | off | Connect before serving and exit if BEC is unreachable |
 | `--client-max-age` | `BEC_MCP_CLIENT_MAX_AGE` | `21600` | Seconds before the BEC client is restarted; `0` never |
-| `--log-cache-size` | `BEC_MCP_LOG_CACHE_SIZE` | `3000` | Log records the server keeps from BEC's log stream; `0` turns the cache off |
+| `--log-cache-size` | `BEC_MCP_LOG_CACHE_SIZE` | `10000` | Log records the server keeps from BEC's log stream; `0` turns the cache off |
 | | `BEC_MCP_REDIS_TIMEOUT` | `5` | Seconds before a Redis connect or reply gives up |
 | | `BEC_MCP_LOG_DIR` | `~/.cache/bec-mcp-server/logs` | bec_lib's log files, unless the service config sets them |
 | `--docs-index` | `BEC_MCP_DOCS_INDEX` | published index | Docs search index: an http(s) URL or a `.json`/`.json.gz` file |
