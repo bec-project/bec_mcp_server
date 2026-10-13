@@ -1,0 +1,42 @@
+Traceback (most recent call last):
+  File "/opt/bec/bec_server/bec_server/scan_server/direct_scan_worker.py", line 89, in run
+    method()
+    ~~~~~~^^
+  File "/opt/bec/bec_server/bec_server/scan_server/scans/scan_modifier.py", line 107, in wrapper
+    return func(self, *args, **kwargs)
+  File "/opt/bec/bec_server/bec_server/scan_server/scans/updated_move.py", line 138, in scan_core
+    self.components.move_and_wait(self.motors, target_positions)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bec/bec_server/bec_server/scan_server/scans/scan_components.py", line 60, in move_and_wait
+    self._actions.set(motors_to_move, positions_to_move, wait=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/bec/bec_server/bec_server/scan_server/scans/scan_actions.py", line 48, in wrapper
+    return method(self, *args, **kwargs)
+  File "/opt/bec/bec_server/bec_server/scan_server/scans/scan_actions.py", line 337, in set
+    status.wait()
+    ~~~~~~~~~~~^^
+  File "/opt/bec/bec_server/bec_server/scan_server/scans/scan_status.py", line 246, in wait
+    self._raise_if_failed(future)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/opt/bec/bec_server/bec_server/scan_server/scans/scan_status.py", line 183, in _raise_if_failed
+    raise obj.exception()
+bec_server.scan_server.errors.DeviceInstructionError: An error occurred during 'set' on device 'samx'.
+
+LimitError: position=50 not within limits (-5, 5)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/bec/bec_server/bec_server/scan_server/scan_worker.py", line 53, in run
+    worker.process_instructions(queue)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/opt/bec/bec_server/bec_server/scan_server/direct_scan_worker.py", line 62, in process_instructions
+    self.run(scan)
+    ~~~~~~~~^^^^^^
+  File "/opt/bec/bec_server/bec_server/scan_server/direct_scan_worker.py", line 97, in run
+    self._handle_exception(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/bec/bec_server/bec_server/scan_server/direct_scan_worker.py", line 161, in _handle_exception
+    raise ScanAbortion from exc
+bec_server.scan_server.errors.ScanAbortion
+
