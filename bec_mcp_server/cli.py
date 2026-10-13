@@ -8,6 +8,7 @@ import os
 import signal
 import threading
 import time
+from typing import Any
 
 from bec_mcp_server.app import BecMcpApp, build_app
 from bec_mcp_server.bec.connection import (
@@ -16,6 +17,7 @@ from bec_mcp_server.bec.connection import (
     BecConnectionConfig,
     BecUnavailableError,
 )
+from bec_mcp_server.bec.log_cache import DEFAULT_LOG_CACHE_SIZE
 from bec_mcp_server.settings import (
     DEFAULT_MAX_BEC_CALLS,
     DEFAULT_TOOL_TIMEOUT_S,
@@ -178,6 +180,15 @@ def build_parser() -> argparse.ArgumentParser:
         f"only grow (default {DEFAULT_CLIENT_MAX_AGE_S:.0f}; 0 never restarts). "
         "[BEC_MCP_CLIENT_MAX_AGE]",
     )
+    bec.add_argument(
+        "--log-cache-size",
+        type=int,
+        default=None,
+        metavar="RECORDS",
+        help="Log records the server keeps from BEC's log stream. The cache connects to BEC in "
+        "the background when the server starts and follows the stream from then on "
+        f"(default {DEFAULT_LOG_CACHE_SIZE}; 0 turns it off). [BEC_MCP_LOG_CACHE_SIZE]",
+    )
     parser.add_argument(
         "--docs-index",
         default=env_optional("BEC_MCP_DOCS_INDEX"),
@@ -242,6 +253,7 @@ def connection_from_args(args: argparse.Namespace, settings: Settings) -> BecCon
         service_config_path=args.config,
         acl_file=args.acl_file,
         client_max_age_s=args.client_max_age,
+        log_cache_size=args.log_cache_size,
     )
     return BecConnection(config)
 
@@ -249,6 +261,7 @@ def connection_from_args(args: argparse.Namespace, settings: Settings) -> BecCon
 def run(app: BecMcpApp) -> None:
     """Serve the app on its configured transport until the client or a signal ends it."""
     settings = app.context.settings
+    _start_log_cache(app.context.connection)
     if settings.transport == "streamable-http":
         run_http(app.server, settings)
     else:
@@ -283,6 +296,29 @@ def _connect_or_exit(connection: BecConnection) -> None:
         connection.connect()
     except BecUnavailableError as exc:
         raise SystemExit(f"bec-mcp-server: cannot connect to BEC at startup: {exc}") from None
+
+
+def _start_log_cache(connection: Any) -> None:
+    """Connect in the background so the log cache follows BEC from server start.
+
+    The server still serves while BEC is down: a failed connect only logs, and the cache then
+    starts with the first tool call that reaches BEC.
+    """
+    if getattr(connection, "log_cache", None) is None:
+        return
+    if connection.state().get("state") != "not_connected":
+        return
+
+    def connect() -> None:
+        try:
+            connection.connect()
+        except BecUnavailableError as exc:
+            logger.info("log cache: BEC not reachable yet, starting on the first call: %s", exc)
+        except Exception:  # pylint: disable=broad-except
+            logger.warning("log cache: background connect failed", exc_info=True)
+
+    # a daemon thread: an exit while BEC is still connecting must not wait for it
+    threading.Thread(target=connect, name="bec-mcp-log-cache-start", daemon=True).start()
 
 
 def _exit_if_stuck(grace: float = EXIT_GRACE_S) -> None:

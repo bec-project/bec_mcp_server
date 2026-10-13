@@ -9,6 +9,7 @@ import pytest
 
 from bec_mcp_server import cli
 from bec_mcp_server.bec.connection import DEFAULT_CLIENT_MAX_AGE_S, BecUnavailableError
+from bec_mcp_server.bec.log_cache import DEFAULT_LOG_CACHE_SIZE
 from bec_mcp_server.settings import DEFAULT_MAX_BEC_CALLS, DEFAULT_TOOL_TIMEOUT_S
 
 _ENV = (
@@ -26,6 +27,7 @@ _ENV = (
     "BEC_MCP_MAX_BEC_CALLS",
     "BEC_MCP_AUDIT_LOG",
     "BEC_MCP_LOG_LEVEL",
+    "BEC_MCP_LOG_CACHE_SIZE",
     "XDG_STATE_HOME",
 )
 
@@ -314,3 +316,83 @@ def test_connect_on_startup_failure_exits_with_the_reason_and_closes(monkeypatch
     with pytest.raises(SystemExit, match="cannot connect to BEC at startup: Could not connect"):
         cli.main(["--audit-log", "off", "--connect-on-startup"])
     assert events == ["close"]
+
+
+# ---------------------------------------------------------------------------- the log cache
+
+
+def test_log_cache_size_from_flag_and_environment(monkeypatch):
+    assert _connection([]).config.log_cache_size == DEFAULT_LOG_CACHE_SIZE
+    assert _connection(["--log-cache-size", "0"]).config.log_cache_size == 0
+    assert _connection(["--log-cache-size", "0"]).log_cache is None
+    monkeypatch.setenv("BEC_MCP_LOG_CACHE_SIZE", "500")
+    assert _connection([]).config.log_cache_size == 500
+    assert _connection(["--log-cache-size", "100"]).log_cache.capacity == 100
+
+
+class _StartRecorder:
+    """Stands in for threading.Thread and records what would have started."""
+
+    started: list[str] = []
+
+    def __init__(self, target, name, daemon):
+        self.target, self.name, self.daemon = target, name, daemon
+
+    def start(self):
+        _StartRecorder.started.append(self.name)
+        assert self.daemon
+        self.target()
+
+
+class _Connection:
+    def __init__(self, cache=True, state="not_connected", error=None):
+        self.log_cache = object() if cache else None
+        self._state = state
+        self.error = error
+        self.connects = 0
+
+    def state(self):
+        return {"state": self._state}
+
+    def connect(self):
+        self.connects += 1
+        if self.error is not None:
+            raise self.error
+
+
+def test_serving_starts_the_log_cache_in_the_background(monkeypatch):
+    started = []
+    monkeypatch.setattr(cli, "_start_log_cache", started.append)
+    monkeypatch.setattr(cli, "run_stdio", lambda server: None)
+    app = type("App", (), {})()
+    app.server = object()
+    app.context = type("Context", (), {"settings": cli.Settings(), "connection": "conn"})()
+
+    cli.run(app)
+
+    assert started == ["conn"]
+
+
+def test_the_background_start_connects_once_and_only_when_needed(monkeypatch):
+    monkeypatch.setattr(cli.threading, "Thread", _StartRecorder)
+    _StartRecorder.started = []
+    waiting, connected, no_cache = _Connection(), _Connection(state="connected"), _Connection(False)
+
+    for connection in (waiting, connected, no_cache, None):
+        cli._start_log_cache(connection)  # pylint: disable=protected-access
+
+    assert _StartRecorder.started == ["bec-mcp-log-cache-start"]
+    assert (waiting.connects, connected.connects, no_cache.connects) == (1, 0, 0)
+
+
+def test_a_failed_background_start_only_logs(monkeypatch, caplog):
+    monkeypatch.setattr(cli.threading, "Thread", _StartRecorder)
+    down = _Connection(error=BecUnavailableError("Redis at localhost:6379 is down"))
+    broken = _Connection(error=RuntimeError("bug"))
+
+    with caplog.at_level("INFO", logger=cli.__name__):
+        cli._start_log_cache(down)  # pylint: disable=protected-access
+        cli._start_log_cache(broken)  # pylint: disable=protected-access
+
+    assert "starting on the first call" in caplog.text
+    assert "background connect failed" in caplog.text

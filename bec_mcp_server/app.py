@@ -19,6 +19,7 @@ from bec_mcp_server.tools import (
     diagnose,
     docs,
     health,
+    log_analysis,
     logs,
     queue_states,
     scans,
@@ -63,6 +64,7 @@ TIER_MODULES: dict[str, tuple[Any, ...]] = {
         queue_states,
         scans,
         logs,
+        log_analysis,
         diagnose,
     ),
 }

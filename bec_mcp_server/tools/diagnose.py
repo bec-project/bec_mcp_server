@@ -365,14 +365,19 @@ def _unreachable(exc: BecUnavailableError) -> dict[str, Any]:
     )
 
 
-def _read_log_stream(client: Any) -> tuple[list[Any], str | None]:
-    """The log stream once for both the log rules and bec_logs' alarms, or why it failed."""
+def _read_log_stream(connection: Any, client: Any) -> tuple[logs.LogSource, str | None]:
+    """The log records once for both the log rules and bec_logs' alarms, or why it failed.
+
+    They come from the log cache while it follows the stream, else from the stream itself.
+    """
     try:
-        return logs.read_log_stream(client), None
+        return logs.cached_or_streamed(connection, client), None
     except _REDIS_FAILURES:
         raise
     except Exception as exc:  # pylint: disable=broad-except
-        return [], f"{type(exc).__name__}: {exc}"
+        return logs.LogSource([], logs.LOG_STREAM_CAPACITY, cached=False), (
+            f"{type(exc).__name__}: {exc}"
+        )
 
 
 def diagnose(
@@ -383,8 +388,8 @@ def diagnose(
     try:
         services = status.status(connection)
         with connection.use() as client:
-            messages, log_error = _read_log_stream(client)
-            snapshot = collect(client, window_s=minutes * 60.0, log_messages=messages)
+            source, log_error = _read_log_stream(connection, client)
+            snapshot = collect(client, window_s=minutes * 60.0, log_messages=source.records)
             if log_error is not None:
                 snapshot.unavailable["the log stream"] = log_error
             entries = rules.tool_entries("services", services)
@@ -401,7 +406,11 @@ def diagnose(
                 entries += _section(
                     "logs",
                     lambda: logs.logs_digest(
-                        messages, logs.read_client_alarms(client), minutes=minutes, limit=1
+                        source.records,
+                        logs.read_client_alarms(client),
+                        minutes=minutes,
+                        limit=1,
+                        stream_capacity=source.capacity,
                     ),
                 )
             entries += rules.finding_entries(rules.unavailable_findings(snapshot))
@@ -423,7 +432,11 @@ def device_diagnose(
     window_s = _window_minutes(window_minutes) * 60.0
     try:
         with connection.use() as client:
-            snapshot = collect(client, device=device or None, window_s=window_s)
+            cache = getattr(connection, "log_cache", None)
+            cached = cache.view().records if cache is not None and cache.following else None
+            snapshot = collect(
+                client, device=device or None, window_s=window_s, log_messages=cached
+            )
     except BecUnavailableError as exc:
         return _unreachable(exc)
     if not device:
