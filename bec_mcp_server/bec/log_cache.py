@@ -26,12 +26,18 @@ from typing import Any
 from bec_lib.endpoints import MessageEndpoints
 
 from bec_mcp_server.bec.digest import iso_time
-from bec_mcp_server.bec.log_stream import LogRecord, parse_log_message, read_log_stream
+from bec_mcp_server.bec.log_stream import (
+    LOG_STREAM_CAPACITY,
+    LogRecord,
+    parse_log_message,
+    read_log_stream,
+)
 
 logger = logging.getLogger(__name__)
 
-#: records the cache holds by default
-DEFAULT_LOG_CACHE_SIZE = 3000
+#: records the cache holds by default: as many as bec_lib keeps in the stream, so the cache
+#: reaches back at least as far as Redis
+DEFAULT_LOG_CACHE_SIZE = LOG_STREAM_CAPACITY
 
 #: characters kept per cached message; a record longer than this is a dump, not a log line
 MAX_STORED_MESSAGE_CHARS = 20_000
@@ -218,7 +224,7 @@ class LogCache:
         return len(self._records)
 
     def view(self) -> CacheView:
-        """A snapshot for one tool call; copying 3000 references takes microseconds."""
+        """A snapshot for one tool call; copying 10,000 references takes well under a millisecond."""
         with self._lock:
             return CacheView(
                 records=list(self._records),
