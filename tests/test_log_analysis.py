@@ -212,6 +212,50 @@ def test_a_device_error_and_the_abort_it_causes_are_one_incident_with_the_alarm_
     assert f"the first, {failure['ref']} DeviceInstructionError" in out["summary"]
 
 
+def _wrapped(device_error: str) -> str:
+    """The captured ScanAbortion chain with another device error in place of the LimitError."""
+    return SCAN_ABORTION_TRACEBACK.replace(
+        "LimitError: position=50 not within limits (-5, 5)", device_error
+    )
+
+
+@pytest.mark.parametrize(
+    "device_error, category",
+    [
+        ("TimeoutError: samx did not reach its target within 10 s", "timeout"),
+        ("DisconnectedError: X10DA-ES1:SAMX.RBV is not connected", "epics"),
+        ("RuntimeError: controller returned error 7", "device_error"),
+    ],
+)
+def test_a_device_failure_wrapped_in_a_scan_abort_is_an_error_about_the_device(
+    device_error, category
+):
+    out = analyze(records_from([("ERROR", "ScanServer", _wrapped(device_error))]))
+    (incident,) = out["data"]["incidents"]
+    assert (incident["category"], incident["severity"]) == (category, "error")
+    assert incident["traceback"]["exception"].endswith("ScanAbortion")
+    assert out["data"]["findings"][0]["next"] == {
+        "tool": "bec_device_diagnose",
+        "args": {"device": "samx"},
+    }
+
+
+def test_a_scan_abort_that_starts_the_chain_is_a_requested_stop():
+    user_abort = (
+        "Traceback (most recent call last):\n"
+        '  File "/opt/bec/bec_server/bec_server/scan_server/scan_worker.py", line 53, in run\n'
+        "    worker.process_instructions(queue)\n"
+        '  File "/opt/bec/bec_server/bec_server/scan_server/instruction_handler.py", line 88, '
+        "in check\n"
+        "    raise ScanAbortion\n"
+        "bec_server.scan_server.errors.ScanAbortion"
+    )
+    out = analyze(records_from([("ERROR", "ScanServer", user_abort)]))
+    (incident,) = out["data"]["incidents"]
+    assert (incident["category"], incident["severity"]) == ("scan_aborted", "info")
+    assert out["findings"][0].startswith("Info: ")
+
+
 def test_findings_point_at_the_device_and_carry_cause_and_suggestion():
     out = analyze(records_from(LIMIT_FAILURE))
     finding = out["findings"][0]
@@ -310,6 +354,26 @@ def test_a_quiet_log_says_so():
     [
         ("", "LimitError: position=50 not within limits (-5, 5)", "limits"),
         ("bec_server.scan_server.errors.ScanAbortion", "", "scan_aborted"),
+        ("KeyboardInterrupt", "", "scan_aborted"),
+        # BEC wraps a device failure in DeviceInstructionError, and that in ScanAbortion
+        ("ScanAbortion DeviceInstructionError TimeoutError", "", "timeout"),
+        ("ScanAbortion DeviceInstructionError DisconnectedError", "", "epics"),
+        (
+            "DeviceInstructionError ScanAbortion",
+            "An error occurred during 'set' on device 'samx'.\nTimeoutError: samx did not "
+            "reach its target",
+            "timeout",
+        ),
+        (
+            "DeviceInstructionError ScanAbortion",
+            "An error occurred during 'set' on device 'samx'.\nDisconnectedError: X10DA:M1.RBV",
+            "epics",
+        ),
+        (
+            "DeviceInstructionError ScanAbortion",
+            "An error occurred during 'trigger' on device 'eiger'.\nRuntimeError: no frames",
+            "device_error",
+        ),
         ("redis.exceptions.ConnectionError", "Error 61 connecting to localhost:6379", "redis"),
         ("redis.exceptions.TimeoutError", "Timeout reading from socket", "redis"),
         ("", "samx: PV X10DA-ES1:MOTOR.RBV not connected", "epics"),

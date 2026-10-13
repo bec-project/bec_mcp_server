@@ -484,7 +484,7 @@ class Incident:  # pylint: disable=too-many-instance-attributes
         return "\n".join(part for part in parts if part)
 
     def types(self) -> str:
-        """The exception type names involved."""
+        """The exception type names involved, the first exception of the chain first."""
         names = []
         if self.traceback is not None:
             names += [e.type for e in self.traceback.chain]

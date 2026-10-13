@@ -1,9 +1,11 @@
 """The rules bec_log_analysis names a likely cause and a next step with.
 
 Each rule recognises one known kind of failure in an incident's exception types and messages.
-They are checked in order and the first match wins, so the specific ones come first: a limit
-error inside a scan abort is about the limits, a Redis timeout is about Redis. A rule only names
-the usual suspect; the records decide.
+They are checked in order and the first match wins, so the specific ones come first: a Redis
+timeout is about Redis, not a device. BEC wraps a device failure during a scan in a
+DeviceInstructionError and that in a ScanAbortion, so a scan abort only counts as one when it is
+the first exception of the chain, and a device failure no specific rule names still points at
+the device. A rule only names the usual suspect; the records decide.
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ class Rule:
     target: Target = "range"
     #: match against the exception types only, not the messages
     types_only: bool = False
+    #: match against the first exception of the chain only
+    root_only: bool = False
     #: a finding severity overriding the records' level
     severity: str | None = None
 
@@ -45,13 +49,6 @@ RULES: tuple[Rule, ...] = (
         "move within the limits, or widen them if the target is intended "
         "(dev.<device>.limits = [low, high])",
         target="device",
-    ),
-    _rule(
-        "scan_aborted",
-        r"\bScanAbortion\b|\bKeyboardInterrupt\b|aborted by (?:the )?user|user requested",
-        "the scan was stopped on request",
-        "nothing to fix unless nobody meant to stop it; check who requested the abort",
-        severity="info",
     ),
     _rule(
         "redis",
@@ -145,6 +142,23 @@ RULES: tuple[Rule, ...] = (
         target="device",
     ),
     _rule(
+        "scan_aborted",
+        r"^(?:[\w.]+\.)?(?:ScanAbortion|KeyboardInterrupt)$",
+        "the scan was stopped on request",
+        "nothing to fix unless nobody meant to stop it; check who requested the abort",
+        root_only=True,
+        severity="info",
+    ),
+    _rule(
+        "device_error",
+        r"\bDeviceInstructionError\b|failed during the execution of the following instruction",
+        "a device failed while carrying out a scan instruction; its own error follows in the "
+        "message",
+        "check the device named in the message, and the device server's records from that "
+        "moment for its own traceback",
+        target="device",
+    ),
+    _rule(
         "code_error",
         r"\b(?:AttributeError|TypeError|NameError|IndexError|KeyError|ValueError|"
         r"AssertionError|ZeroDivisionError|NotImplementedError|UnboundLocalError|"
@@ -172,9 +186,19 @@ _NOT_DEVICES = frozenset({"server", "manager", "config", "the", "a", "an", "name
 
 
 def classify(types: str, text: str) -> Rule:
-    """The first rule whose pattern matches; ``types`` holds the exception type names."""
+    """The first rule whose pattern matches.
+
+    ``types`` holds the exception type names of the chain, separated by spaces, the first
+    exception first; ``text`` the logged message and the exception messages.
+    """
+    root = types.split()[0] if types.strip() else ""
     for rule in RULES:
-        haystack = types if rule.types_only else f"{types}\n{text}"
+        if rule.root_only:
+            haystack = root
+        elif rule.types_only:
+            haystack = types
+        else:
+            haystack = f"{types}\n{text}"
         if re.search(rule.pattern, haystack):
             return rule
     return UNCLASSIFIED
