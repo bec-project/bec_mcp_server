@@ -7,6 +7,7 @@ import os
 import sys
 import textwrap
 import traceback
+from pathlib import Path
 
 import anyio
 import pytest
@@ -560,6 +561,14 @@ def test_register_refuses_a_context_without_roots(src):
     assert isinstance(context, ToolContext)
     with pytest.raises(RuntimeError, match="source roots"):
         code.register(build_app().server, context, code_hints.TracebackRefs())
+
+
+def test_the_readme_documents_code_mode():
+    text = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+
+    assert "--code-root" in text
+    for name in CODE_TOOLS:
+        assert f"`{name}`" in text
 
 
 def test_the_source_snippet_helper_dedents_nothing():

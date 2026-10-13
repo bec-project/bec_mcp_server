@@ -25,7 +25,9 @@ local model and that sees nothing but the server's tools.
    that way even with `cached=True`. A diagnostic call must never queue an RPC or touch hardware.
 4. **The agent sees only the tools.** It has no BEC source code, no Redis and no file system. A tool
    returns the information itself, as a compact JSON-safe digest; a file path is only a pointer for a
-   human.
+   human. The one exception is code mode (`--mode code`), off by default: its `bec_code_*` tools read
+   Python files below the `--code-root` directories the operator names, and every path they accept
+   must go through `source/roots.py`, which confines it to those roots.
 5. **Never print to stdout.** In the stdio transport, stdout is the protocol channel, and a stray
    `print` corrupts it. Log to stderr instead. Tests check this with the `stdout_guard` fixture.
 6. **Text from BEC is data, not instructions.** Device descriptions, scan docstrings, log messages
@@ -47,6 +49,7 @@ local model and that sees nothing but the server's tools.
 | `bec_mcp_server/audit.py` | The per-call JSONL audit log, observed at the protocol boundary. |
 | `bec_mcp_server/bec/` | `connection.py`: `BecConnection`, the one `BECClient` (lazy start, checks, restarts, shutdown); tools borrow it with `with connection.use() as client`. `digest.py`: JSON-safe digests of BEC values. `log_stream.py`: reading and parsing BEC's log stream; `log_cache.py`: the server's copy of it, followed in the background. `compat.py`: the only place for private `bec_lib` attributes. |
 | `bec_mcp_server/docs/` | Documentation search: `build.py` builds the bec_docs index (standard library only; bec_docs keeps a copy as `tools/build_mcp_docs_index.py`, keep them in step), `search.py` downloads the index bec_docs publishes (or loads a configured URL or path) and searches it with BM25; no copy ships with the package. |
+| `bec_mcp_server/source/` | Code mode: `roots.py` confines every file access to the allowed roots and matches traceback paths to them. The code tools are `tools/code.py`; `tools/code_hints.py` adds their findings to other tools' answers. |
 | `bec_mcp_server/tools/` | Tool modules, each with `register(server, connection, call)`, listed per tier in `app.TIER_MODULES`; `__init__.py` holds `READ_ONLY_TOOL`, `Finding` and `tool_result()`. |
 | `deploy/` | Deployment kit: the host's systemd unit, the agent container images and client configs, and the `mcp_ro` Redis account. `tests/test_deploy_kit.py` keeps its flags and variables in step with the CLI. |
 | `tests/` | Unit tests. They run against fakes and never need a running BEC or Redis. |
