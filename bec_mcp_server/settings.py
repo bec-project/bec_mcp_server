@@ -4,18 +4,25 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
+
+from bec_mcp_server.source.roots import SourceRoot
 
 Transport = Literal["stdio", "streamable-http"]
 
 TRANSPORTS: tuple[str, ...] = ("stdio", "streamable-http")
 
 #: server modes and the capability tiers each one exposes; tools are labeled by tier and
-#: graduate by re-labeling, never by renaming. v1 ships diagnose only, which includes the "learn"
-#: tier (docs search); write tiers come back later behind their own Redis account
-MODE_TIERS: dict[str, frozenset[str]] = {"diagnose": frozenset({"diagnose", "learn"})}
+#: graduate by re-labeling, never by renaming. diagnose includes the "learn" tier (docs search);
+#: code adds read-only access to source code under the roots the operator names. Write tiers
+#: come back later behind their own Redis account
+MODE_TIERS: dict[str, frozenset[str]] = {
+    "diagnose": frozenset({"diagnose", "learn"}),
+    "code": frozenset({"diagnose", "learn", "code"}),
+}
 
 LOG_LEVELS: tuple[str, ...] = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
@@ -32,6 +39,9 @@ _LOOPBACK_ALLOWED_ORIGINS = ("http://127.0.0.1:*", "http://localhost:*", "http:/
 
 #: values of BEC_MCP_AUDIT_LOG / --audit-log that switch the audit log off
 _AUDIT_OFF = frozenset({"off", "none", "no", "false", "0"})
+
+#: what a --code-root label may look like; it becomes the first part of every path shown
+_LABEL_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,6 +68,8 @@ class Settings:
     log_level: str = "INFO"
     #: path or http(s) URL of the docs index; None downloads the one the bec_docs deploy publishes
     docs_index: str | None = None
+    #: directories code mode may read below; required by, and only allowed in, code mode
+    code_roots: tuple[SourceRoot, ...] = ()
 
     def __post_init__(self) -> None:
         if self.transport not in TRANSPORTS:
@@ -72,6 +84,15 @@ class Settings:
             raise SystemExit("BEC_MCP_MAX_BEC_CALLS/--max-bec-calls must be at least 1")
         if self.log_level not in LOG_LEVELS:
             raise SystemExit(f"invalid log level {self.log_level!r}: use one of {LOG_LEVELS}")
+        if "code" in self.tiers and not self.code_roots:
+            raise SystemExit(
+                "code mode reads source code only below the directories you allow: give at least "
+                "one --code-root (BEC_MCP_CODE_ROOTS)"
+            )
+        if self.code_roots and "code" not in self.tiers:
+            raise SystemExit(
+                f"--code-root (BEC_MCP_CODE_ROOTS) only applies to --mode code, not {self.mode}"
+            )
 
     @property
     def tiers(self) -> frozenset[str]:
@@ -169,6 +190,40 @@ def parse_origin_list(raw: str | None, *, option: str) -> tuple[str, ...]:
         _origin_patterns(entry)
         entries.append(entry)
     return tuple(entries)
+
+
+def parse_code_roots(entries: list[str] | None, *, option: str) -> tuple[SourceRoot, ...]:
+    """Directories code mode may read below, from ``[label=]path`` entries, comma-separated.
+
+    The label is how the agent names the root; it defaults to the directory's name, and a
+    repeated name gets a number. Host paths themselves are never shown to the agent.
+    """
+    roots: list[SourceRoot] = []
+    seen_paths: set[Path] = set()
+    for raw in ",".join(entries or ()).split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        label, _, path_text = entry.rpartition("=")
+        if label and not _LABEL_RE.match(label):
+            label, path_text = "", entry
+        path = Path(path_text).expanduser().resolve()
+        if not path.is_dir():
+            raise SystemExit(f"invalid {option} {entry!r}: {path} is not a directory")
+        if path == Path(path.anchor):
+            raise SystemExit(f"invalid {option} {entry!r}: allow a source directory, not {path}")
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        label = label or path.name
+        taken = {root.label for root in roots}
+        if label in taken:
+            number = 2
+            while f"{label}-{number}" in taken:
+                number += 1
+            label = f"{label}-{number}"
+        roots.append(SourceRoot(label, path))
+    return tuple(roots)
 
 
 def default_audit_log_path() -> Path:
