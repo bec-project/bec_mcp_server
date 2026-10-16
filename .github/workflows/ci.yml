@@ -81,9 +81,6 @@ jobs:
             exit 1
           fi
 
-      - name: Check that the wheel ships the bundled docs index
-        run: unzip -Z1 dist/*.whl | grep -qx 'bec_mcp_server/docs/bec_docs_index.json.gz'
-
       - name: Install the wheel into a clean environment
         run: |
           python -m venv /tmp/clean

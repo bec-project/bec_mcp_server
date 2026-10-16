@@ -35,7 +35,7 @@ local model and that sees nothing but the server's tools.
 | Path | What goes there |
 | --- | --- |
 | `bec_mcp_server/server.py` | The MCP server: argument parsing, tool registration, `main()` (the `bec-mcp-server` console script). |
-| `bec_mcp_server/docs/` | Documentation search: `build.py` builds the bec_docs index (standard library only; bec_docs keeps a copy as `tools/build_mcp_docs_index.py`, keep them in step), `search.py` loads it from a path or URL and searches it with BM25, `bec_docs_index.json.gz` is the bundled fallback. |
+| `bec_mcp_server/docs/` | Documentation search: `build.py` builds the bec_docs index (standard library only; bec_docs keeps a copy as `tools/build_mcp_docs_index.py`, keep them in step), `search.py` downloads the index bec_docs publishes (or loads a configured URL or path) and searches it with BM25; no copy ships with the package. |
 | `bec_mcp_server/client.py` | `BecConnection` (the one `BECClient`) and the pure helpers that turn BEC objects into JSON-safe digests. |
 | `tests/` | Unit tests. They run against fakes and never need a running BEC or Redis. |
 | `.github/workflows/ci.yml` | Lint, the Python 3.11 to 3.14 test matrix, and a wheel build installed into a clean environment. |

@@ -41,7 +41,7 @@ the first tool call. Command-line options can also be set through the environmen
 | `BEC_REDIS_PORT` | `6379` | Redis port of the BEC instance |
 | `BEC_REDIS_USERNAME` | unset | Redis ACL user |
 | `BEC_REDIS_PASSWORD` | unset | Redis ACL password |
-| `BEC_MCP_DOCS_INDEX` | bundled | Docs search index: a `.json`/`.json.gz` file or an http(s) URL (`--docs-index`) |
+| `BEC_MCP_DOCS_INDEX` | published index | Docs search index: an http(s) URL or a `.json`/`.json.gz` file (`--docs-index`) |
 
 The HTTP transport has no authentication yet, so keep it bound to `127.0.0.1`.
 
@@ -64,18 +64,18 @@ The HTTP transport has no authentication yet, so keep it bound to `127.0.0.1`.
 ## Documentation search
 
 `bec_docs_search` and `bec_docs_page` search the [BEC documentation](https://bec-project.github.io/bec_docs/)
-with BM25, in memory, over a small index file (about 100 KB). The `bec_docs` deploy builds that file from
-every published version of the docs and serves it at
-`https://bec-project.github.io/bec_docs/bec_docs_index.json.gz`; hosts that only reach a git mirror can read
-the same file from the `mcp-docs-index` branch of `bec_docs`. Point the server at it:
+with BM25, in memory, over a small index file (about 100 KB). No copy ships with the server: the `bec_docs`
+deploy builds the file from every published version of the docs and serves it at
+`https://bec-project.github.io/bec_docs/bec_docs_index.json.gz`, which the server downloads by default.
+Hosts that only reach a git mirror can read the same file from the `mcp-docs-index` branch of `bec_docs`:
 
 ```bash
-bec-mcp-server --docs-index https://bec-project.github.io/bec_docs/bec_docs_index.json.gz
+bec-mcp-server --docs-index https://<mirror>/<org>/bec_docs/raw/branch/mcp-docs-index/bec_docs_index.json.gz
 ```
 
-A URL is downloaded again every hour, a local file is reloaded when it changes, and the last good copy keeps
-serving if a download fails. Without `--docs-index`, or when it cannot be loaded, the server uses the index
-bundled with the package. To build an index from a local `bec_docs` checkout:
+A URL is downloaded again every hour and a local file is reloaded when it changes; if a later download
+fails, the last good copy keeps serving. Until the first download succeeds, the docs tools answer that the
+docs are unavailable and retry after five minutes. To build an index from a local `bec_docs` checkout:
 
 ```bash
 bec-mcp-build-docs-index path/to/bec_docs --output bec_docs_index.json.gz

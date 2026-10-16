@@ -1,6 +1,9 @@
 import asyncio
 import json
 
+import pytest
+
+from bec_mcp_server.docs.build import build_docs_index
 from bec_mcp_server.server import build_server, parse_args
 
 EXPECTED_TOOLS = {
@@ -58,33 +61,60 @@ def _call(server, name, arguments):
     return json.loads(blocks[0].text)
 
 
-def test_docs_tools_search_and_read_the_bundled_index():
-    server = build_server(connect_on_startup=False)
+@pytest.fixture
+def docs_index(tmp_path):
+    """A docs index built from a two-page bec_docs-like repository."""
+    repo = tmp_path / "bec_docs"
+    (repo / "docs" / "how-to").mkdir(parents=True)
+    (repo / "zensical.toml").write_text(
+        '[project]\nsite_url = "https://bec.example.org/docs/"\ndocs_dir = "docs"\n'
+    )
+    (repo / "docs" / "index.md").write_text("# Welcome to BEC\n\nBEC runs scans.\n")
+    (repo / "docs" / "how-to" / "line-scan.md").write_text(
+        "# Run a line scan\n\n## Start it\n\nCall scans.line_scan with a motor.\n"
+    )
+    index = tmp_path / "index.json.gz"
+    build_docs_index(repo, index)
+    return str(index)
+
+
+def test_docs_tools_search_and_read_the_configured_index(docs_index):
+    server = build_server(connect_on_startup=False, docs_index=docs_index)
 
     found = _call(server, "bec_docs_search", {"query": "run a line scan"})
     first = found["results"][0]
     page = _call(server, "bec_docs_page", {"path": first["path"]})
 
-    assert found["index"].startswith("bec_docs@")
-    assert found["docs_index"]["loaded_from"] == "bundled"
-    assert page["found"] is True and page["title"] == first["title"]
+    assert first["path"] == "how-to/line-scan.md"
+    assert found["docs_index"]["loaded_from"] == docs_index
+    assert page["found"] is True and page["title"] == "Run a line scan"
 
 
-def test_docs_search_without_query_lists_the_pages():
-    server = build_server(connect_on_startup=False)
+def test_docs_search_without_query_lists_the_pages(docs_index):
+    server = build_server(connect_on_startup=False, docs_index=docs_index)
 
     contents = _call(server, "bec_docs_search", {})
 
-    assert len(contents["pages"]) > 50
+    assert [page["path"] for page in contents["pages"]] == ["how-to/line-scan.md", "index.md"]
 
 
-def test_unknown_docs_page_names_similar_pages():
-    server = build_server(connect_on_startup=False)
+def test_unknown_docs_page_names_similar_pages(docs_index):
+    server = build_server(connect_on_startup=False, docs_index=docs_index)
 
-    page = _call(server, "bec_docs_page", {"path": "how-to/scans/line-scan-tutorial.md"})
+    page = _call(server, "bec_docs_page", {"path": "how-to/line-scans.md"})
 
     assert page["found"] is False
     assert "Similar pages" in page["message"]
+
+
+def test_docs_tools_say_when_the_index_cannot_be_loaded(tmp_path):
+    server = build_server(connect_on_startup=False, docs_index=str(tmp_path / "missing.json"))
+
+    found = _call(server, "bec_docs_search", {"query": "line scan"})
+    page = _call(server, "bec_docs_page", {"path": "index.md"})
+
+    assert found["available"] is False and "missing.json" in found["message"]
+    assert page["found"] is False and "missing.json" in page["message"]
 
 
 def test_docs_index_comes_from_the_environment(monkeypatch, tmp_path):

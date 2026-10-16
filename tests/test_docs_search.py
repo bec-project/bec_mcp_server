@@ -314,16 +314,11 @@ def test_long_page_is_cut(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------- loading
 
 
-def test_bundled_index_is_used_by_default():
+def test_published_index_is_the_default_and_nothing_loads_until_asked():
     docs = DocsIndex(DocsIndexConfig())
 
-    assert docs.describe() == {"configured": "bundled", "state": "not_loaded"}
-    assert docs.search("line scan")["results"]
-    described = docs.describe()
-    assert described["state"] == "loaded"
-    assert described["loaded_from"] == "bundled"
-    assert described["version"].startswith("bec_docs@")
-    assert "fallback" not in described
+    assert docs.location == search.DEFAULT_INDEX_URL
+    assert docs.describe() == {"configured": search.DEFAULT_INDEX_URL, "state": "not_loaded"}
 
 
 def test_index_reloads_when_the_file_changes(tmp_path):
@@ -338,14 +333,14 @@ def test_index_reloads_when_the_file_changes(tmp_path):
     assert docs.search("zzz_fresh_marker")["results"][0]["path"] == "fresh.md"
 
 
-def test_missing_index_falls_back_to_bundled_and_says_so(tmp_path):
+def test_missing_index_is_reported_as_unavailable(tmp_path):
     docs = DocsIndex(DocsIndexConfig(location=str(tmp_path / "missing.json")))
 
-    assert docs.search("line scan")["results"]
+    with pytest.raises(search.DocsUnavailableError, match="missing.json"):
+        docs.search("line scan")
 
     described = docs.describe()
-    assert described["state"] == "fallback"
-    assert "bundled" in described["fallback"]
+    assert described["state"] == "unavailable"
     assert "missing.json" in described["error"]
 
 
@@ -370,9 +365,8 @@ def test_unknown_schema_version_is_rejected(tmp_path):
     )
     docs = DocsIndex(DocsIndexConfig(location=str(index_path)))
 
-    docs.search("scan")
-
-    assert "schema_version" in docs.describe()["error"]
+    with pytest.raises(search.DocsUnavailableError, match="schema_version"):
+        docs.search("scan")
 
 
 def test_old_index_carries_a_warning(tmp_path):
@@ -419,7 +413,7 @@ def test_index_loads_from_a_url(tmp_path, http_index):
     assert docs.describe()["loaded_from"] == url
 
 
-def test_unreachable_url_falls_back_and_is_not_retried_on_every_call(
+def test_unreachable_url_is_unavailable_and_not_retried_on_every_call(
     tmp_path, http_index, monkeypatch
 ):
     calls = []
@@ -427,11 +421,11 @@ def test_unreachable_url_falls_back_and_is_not_retried_on_every_call(
     monkeypatch.setattr(search, "_fetch", lambda *a: calls.append(a) or real_fetch(*a))
     docs = DocsIndex(DocsIndexConfig(location=f"{http_index}/missing.json"))
 
-    docs.search("line scan")
-    docs.search("line scan")
+    for _ in range(2):
+        with pytest.raises(search.DocsUnavailableError, match="404"):
+            docs.search("line scan")
 
-    assert docs.describe()["state"] == "fallback"
-    assert "404" in docs.describe()["error"]
+    assert docs.describe()["state"] == "unavailable"
     assert len(calls) == 1
 
 
@@ -547,10 +541,17 @@ GOLDEN_DOCS_QUERIES = {
 }
 
 
+# no copy of the bec_docs index ships with the package and the unit tests stay offline, so these
+# run only against an index given in BEC_MCP_DOCS_INDEX: a freshly built file or the published URL
+_GOLDEN_LOCATION = os.environ.get("BEC_MCP_DOCS_INDEX")
+needs_bec_docs_index = pytest.mark.skipif(
+    not _GOLDEN_LOCATION, reason="set BEC_MCP_DOCS_INDEX to a built or published bec_docs index"
+)
+
+
+@needs_bec_docs_index
 @pytest.mark.parametrize("query", sorted(GOLDEN_DOCS_QUERIES))
 def test_golden_queries_on_the_bec_docs_index(query):
-    # runs on the bundled index by default; set BEC_MCP_DOCS_INDEX to a freshly built or
-    # published index (path or URL) to check that one before it ships
     docs = _golden_docs_index()
 
     results = docs.search(query, limit=3)
@@ -567,19 +568,19 @@ _GOLDEN_INDEX: list[DocsIndex] = []
 
 def _golden_docs_index() -> DocsIndex:
     if not _GOLDEN_INDEX:
-        location = os.environ.get("BEC_MCP_DOCS_INDEX") or None
-        _GOLDEN_INDEX.append(DocsIndex(DocsIndexConfig(location=location)))
+        _GOLDEN_INDEX.append(DocsIndex(DocsIndexConfig(location=_GOLDEN_LOCATION)))
     return _GOLDEN_INDEX[0]
 
 
-def test_bundled_index_holds_only_published_bec_docs_pages():
-    payload = json.loads(gzip.decompress(Path(search.BUNDLED_INDEX).read_bytes()))
+@needs_bec_docs_index
+def test_bec_docs_index_holds_only_published_pages():
+    snapshot = _golden_docs_index()._ensure_loaded()
 
-    assert payload["source"]["name"] == "bec_docs"
-    assert payload["source"]["site_url"] == _SITE_URL
-    assert not payload["source"]["git_commit"].endswith("-dirty")
-    assert all(page["url"].startswith(_SITE_URL) for page in payload["pages"])
-    assert not any("Placeholder" in page["sections"][0]["text"] for page in payload["pages"])
+    assert snapshot.source["name"] == "bec_docs"
+    assert snapshot.source["site_url"] == _SITE_URL
+    assert not (snapshot.source.get("git_commit") or "").endswith("-dirty")
+    assert all(page.url.startswith(_SITE_URL) for page in snapshot.pages.values())
+    assert not any("Placeholder" in page.sections[0].text for page in snapshot.pages.values())
 
 
 def test_autodoc_directive_and_its_options_are_dropped(tmp_path):

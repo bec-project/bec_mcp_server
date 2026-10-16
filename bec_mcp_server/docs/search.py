@@ -1,8 +1,9 @@
 """In-process BM25 search over the BEC documentation index.
 
-The index is a JSON file built from bec_docs by :mod:`bec_mcp_server.docs.build`, normally in the
-bec_docs CI. The server loads it from a path or an http(s) URL and falls back to the small index
-bundled with the package when none is configured or the configured one cannot be loaded.
+The index is a JSON file built from bec_docs by :mod:`bec_mcp_server.docs.build`. The bec_docs
+deploy publishes it with every version of the docs at :data:`DEFAULT_INDEX_URL`; the server
+downloads it from there, or from another http(s) URL or a local path when one is configured. No
+copy ships with the package, so the docs the agent reads are always the published ones.
 
 Search needs no external service and keeps no state on disk, so any number of server processes
 can share one index file without locking.
@@ -26,8 +27,8 @@ from urllib.parse import unquote, urlsplit
 
 from bec_mcp_server.docs.build import INDEX_FORMAT, SCHEMA_VERSION
 
-#: index shipped with the package, used when no index is configured or it cannot be loaded
-BUNDLED_INDEX = Path(__file__).resolve().parent / "bec_docs_index.json.gz"
+#: the index the bec_docs deploy publishes next to the docs site
+DEFAULT_INDEX_URL = "https://bec-project.github.io/bec_docs/bec_docs_index.json.gz"
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_:-]*")
 _TOKEN_SPLIT_RE = re.compile(r"[_:-]+")
@@ -114,9 +115,13 @@ def _fetch(url: str, timeout: float) -> bytes:
     return raw
 
 
+class DocsUnavailableError(RuntimeError):
+    """No docs index could be loaded yet; the message says from where and why."""
+
+
 @dataclass(frozen=True)
 class DocsIndexConfig:
-    #: path or http(s) URL of the index; None uses the bundled index
+    #: path or http(s) URL of the index; None uses DEFAULT_INDEX_URL
     location: str | None = None
     #: how often a URL is downloaded again; paths reload whenever their mtime changes
     refresh_s: float = 3600.0
@@ -241,6 +246,7 @@ class DocsIndex:
 
     def __init__(self, config: DocsIndexConfig | None = None) -> None:
         self.config = config or DocsIndexConfig()
+        self.location = self.config.location or DEFAULT_INDEX_URL
         self._lock = threading.Lock()
         self._snapshot: _Snapshot | None = None
         self._error: str | None = None
@@ -252,13 +258,12 @@ class DocsIndex:
     # ------------------------------------------------------------------ loading
 
     def _needs_reload(self) -> bool:
-        location = self.config.location
+        location = self.location
+        if _is_url(location):
+            # also after a failed first download: the retry waits for _next_fetch
+            return time.monotonic() >= self._next_fetch
         if self._snapshot is None:
             return True
-        if location is None:
-            return False
-        if _is_url(location):
-            return time.monotonic() >= self._next_fetch
         try:
             mtime = Path(location).expanduser().stat().st_mtime
         except OSError:
@@ -287,39 +292,33 @@ class DocsIndex:
             self._seen_mtime = None
         return _build_snapshot(_decode_index(path.read_bytes()), str(path))
 
-    def _reload(self) -> _Snapshot:
-        location = self.config.location
-        previous = self._snapshot
-        if location is not None:
-            try:
-                snapshot = self._load_configured(location)
-            except (OSError, ValueError) as exc:
-                self._error = f"Could not load the docs index from {location}: {exc}."
-            else:
-                self._error = None
-                return snapshot
-            if previous is not None:
-                # keep serving the last good index (or the bundled fallback already loaded)
-                return previous
-        return _build_snapshot(_decode_index(BUNDLED_INDEX.read_bytes()), "bundled")
+    def _reload(self) -> _Snapshot | None:
+        """Load the index; on failure keep the last good one (None if there is none yet)."""
+        try:
+            snapshot = self._load_configured(self.location)
+        except (OSError, ValueError) as exc:
+            self._error = f"Could not load the docs index from {self.location}: {exc}."
+            return self._snapshot
+        self._error = None
+        return snapshot
 
     def _ensure_loaded(self) -> _Snapshot:
+        """The loaded index, (re)loading it when due.
+
+        Raises:
+            DocsUnavailableError: when no index has been loaded yet and loading it fails.
+        """
         snapshot = self._snapshot
         if snapshot is not None and not self._needs_reload():
             return snapshot
         with self._lock:
-            if self._snapshot is None or self._needs_reload():
+            if self._needs_reload():
                 self._snapshot = self._reload()
+            if self._snapshot is None:
+                raise DocsUnavailableError(
+                    self._error or f"The docs index at {self.location} is not loaded yet."
+                )
             return self._snapshot
-
-    def _fallback_note(self, snapshot: _Snapshot) -> str | None:
-        if self.config.location is None or snapshot.location != "bundled":
-            return None
-        return (
-            f"The configured docs index could not be loaded; answers come from the docs bundled "
-            f"with the server ({snapshot.version}, generated {snapshot.generated_at}), which may "
-            f"be out of date."
-        )
 
     # ------------------------------------------------------------------ queries
 
@@ -329,19 +328,18 @@ class DocsIndex:
         Safe to call on the event loop, so mcp_status can report the docs index version.
         """
         snapshot = self._snapshot
-        described: dict[str, Any] = {"configured": self.config.location or "bundled"}
+        described: dict[str, Any] = {"configured": self.location}
         if snapshot is None:
-            described["state"] = "not_loaded"
+            described["state"] = "unavailable" if self._error else "not_loaded"
+            if self._error:
+                described["error"] = self._error
             return described
-        fallback = self._fallback_note(snapshot)
         described.update(
-            state="fallback" if fallback else "loaded",
+            state="loaded",
             loaded_from=snapshot.location,
             version=snapshot.version,
             generated_at=snapshot.generated_at,
         )
-        if fallback:
-            described["fallback"] = fallback
         age_days = _age_days(snapshot.generated_at)
         if age_days is not None and age_days > _STALE_INDEX_AFTER_DAYS:
             described["warning"] = f"The docs index is {age_days} days old and may be out of date."
