@@ -282,6 +282,7 @@ sudo cat /etc/bec-mcp/token | tr -d '\n' | podman secret create bec_mcp_token -
 | `401` with the token | The secret differs from `/etc/bec-mcp/token`, e.g. after a rotation. Recreate the secret. |
 | `Connection refused` or `reset` from a container | The network flags are missing or wrong for this host's network mode; see [Networking on Linux](#networking-on-linux). |
 | Tools answer, but BEC is unreachable | Check `BEC_REDIS_HOST`/`BEC_REDIS_PORT` and the `mcp_ro` password; `redis-cli ACL LOG` on the Redis shows refused commands. |
+| Docs tools answer that the docs are unavailable | The host cannot download `BEC_MCP_DOCS_INDEX`. Check it with `curl -sI` from the host, or point it at the `mcp-docs-index` branch of a git mirror; the server tries again every five minutes. |
 | The service does not start | `journalctl -u bec-mcp -e`. `could not read token file` means a file in `/etc/bec-mcp` is missing or not readable by the group `bec-mcp`. |
 
 Every tool call is logged to `/var/lib/bec-mcp/audit.jsonl` with its arguments, duration and
