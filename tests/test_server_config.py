@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from bec_mcp_server.server import build_server, parse_args
 
@@ -12,6 +13,8 @@ EXPECTED_TOOLS = {
     "bec_scan_details",
     "bec_scan_interlock",
     "bec_queue",
+    "bec_docs_search",
+    "bec_docs_page",
 }
 
 
@@ -23,6 +26,7 @@ def test_parse_args_defaults_to_streamable_http():
     assert args.port == 8000
     assert args.path == "/mcp"
     assert args.lazy_connect is False
+    assert args.docs_index is None
 
 
 def test_parse_args_accepts_custom_http_values():
@@ -46,3 +50,44 @@ def test_build_server_registers_only_read_only_tools_without_connecting():
 
     assert {tool.name for tool in tools} == EXPECTED_TOOLS
     assert all(tool.annotations.readOnlyHint for tool in tools)
+
+
+def _call(server, name, arguments):
+    content = asyncio.run(server.call_tool(name, arguments))
+    blocks = content[0] if isinstance(content, tuple) else content
+    return json.loads(blocks[0].text)
+
+
+def test_docs_tools_search_and_read_the_bundled_index():
+    server = build_server(connect_on_startup=False)
+
+    found = _call(server, "bec_docs_search", {"query": "run a line scan"})
+    first = found["results"][0]
+    page = _call(server, "bec_docs_page", {"path": first["path"]})
+
+    assert found["index"].startswith("bec_docs@")
+    assert found["docs_index"]["loaded_from"] == "bundled"
+    assert page["found"] is True and page["title"] == first["title"]
+
+
+def test_docs_search_without_query_lists_the_pages():
+    server = build_server(connect_on_startup=False)
+
+    contents = _call(server, "bec_docs_search", {})
+
+    assert len(contents["pages"]) > 50
+
+
+def test_unknown_docs_page_names_similar_pages():
+    server = build_server(connect_on_startup=False)
+
+    page = _call(server, "bec_docs_page", {"path": "how-to/scans/line-scan-tutorial.md"})
+
+    assert page["found"] is False
+    assert "Similar pages" in page["message"]
+
+
+def test_docs_index_comes_from_the_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("BEC_MCP_DOCS_INDEX", str(tmp_path / "index.json.gz"))
+
+    assert parse_args([]).docs_index == str(tmp_path / "index.json.gz")

@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from bec_mcp_server.client import BecConnection
+from bec_mcp_server.docs.search import DocsIndex, DocsIndexConfig
 
 
 def _env_str(name: str, default: str) -> str:
@@ -26,10 +27,16 @@ def build_server(
     port: int = 8000,
     streamable_http_path: str = "/mcp",
     connect_on_startup: bool = True,
+    docs_index: str | None = None,
 ) -> FastMCP:
-    """Create the MCP server and register the read-only BEC tools."""
+    """Create the MCP server and register the read-only BEC and documentation tools.
+
+    Args:
+        docs_index: Path or http(s) URL of the bec_docs search index; None uses the bundled one.
+    """
     mcp = FastMCP("bec", host=host, port=port, streamable_http_path=streamable_http_path)
     bec = BecConnection()
+    docs = DocsIndex(DocsIndexConfig(location=docs_index))
     if connect_on_startup:
         bec.connect()
 
@@ -107,6 +114,29 @@ def build_server(
         """Return a compact summary of the current BEC scan queues."""
         return bec.queue()
 
+    @mcp.tool(
+        description="Safe to run. Read-only. Search the official BEC documentation for a question "
+        "or keywords and return the best-matching pages with their URLs; without a query, list "
+        "every page.",
+        annotations=READ_ONLY_TOOL,
+    )
+    def bec_docs_search(query: str = "", limit: int = 5) -> dict:
+        """Search the BEC documentation index; an empty query returns its table of contents."""
+        found = docs.search(query, limit) if query.strip() else docs.toc()
+        return {**found, "docs_index": docs.describe()}
+
+    @mcp.tool(
+        description="Safe to run. Read-only. Return the text of one BEC documentation page by its "
+        "path or URL, or of one section when a heading is given.",
+        annotations=READ_ONLY_TOOL,
+    )
+    def bec_docs_page(path: str, heading: str = "") -> dict:
+        """Return one documentation page, or one section of it."""
+        try:
+            return {"found": True, **docs.page(path, heading or None)}
+        except LookupError as exc:
+            return {"found": False, "path": path, "message": str(exc)}
+
     return mcp
 
 
@@ -140,6 +170,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Defer creating the BEC client until the first MCP tool call.",
     )
+    parser.add_argument(
+        "--docs-index",
+        default=os.environ.get("BEC_MCP_DOCS_INDEX") or None,
+        metavar="PATH_OR_URL",
+        help="Docs search index built from bec_docs (a .json or .json.gz file, or an http(s) "
+        "URL such as https://bec-project.github.io/bec_docs/bec_docs_index.json.gz); the index "
+        "bundled with the server is used when unset or unreadable.",
+    )
     return parser.parse_args(argv)
 
 
@@ -151,5 +189,6 @@ def main(argv: list[str] | None = None) -> None:
         port=args.port,
         streamable_http_path=args.path,
         connect_on_startup=not args.lazy_connect,
+        docs_index=args.docs_index,
     )
     mcp.run(transport=args.transport)

@@ -41,6 +41,7 @@ the first tool call. Command-line options can also be set through the environmen
 | `BEC_REDIS_PORT` | `6379` | Redis port of the BEC instance |
 | `BEC_REDIS_USERNAME` | unset | Redis ACL user |
 | `BEC_REDIS_PASSWORD` | unset | Redis ACL password |
+| `BEC_MCP_DOCS_INDEX` | bundled | Docs search index: a `.json`/`.json.gz` file or an http(s) URL (`--docs-index`) |
 
 The HTTP transport has no authentication yet, so keep it bound to `127.0.0.1`.
 
@@ -57,6 +58,28 @@ The HTTP transport has no authentication yet, so keep it bound to `127.0.0.1`.
 | `bec_scan_details` | One scan's signature and arguments |
 | `bec_scan_interlock` | The scan interlock configuration and the states it watches |
 | `bec_queue` | A compact summary of the scan queues |
+| `bec_docs_search` | The best-matching pages of the BEC documentation, or all pages without a query |
+| `bec_docs_page` | One documentation page, or one section of it |
+
+## Documentation search
+
+`bec_docs_search` and `bec_docs_page` search the [BEC documentation](https://bec-project.github.io/bec_docs/)
+with BM25, in memory, over a small index file (about 100 KB). The `bec_docs` deploy builds that file from
+every published version of the docs and serves it at
+`https://bec-project.github.io/bec_docs/bec_docs_index.json.gz`; hosts that only reach a git mirror can read
+the same file from the `mcp-docs-index` branch of `bec_docs`. Point the server at it:
+
+```bash
+bec-mcp-server --docs-index https://bec-project.github.io/bec_docs/bec_docs_index.json.gz
+```
+
+A URL is downloaded again every hour, a local file is reloaded when it changes, and the last good copy keeps
+serving if a download fails. Without `--docs-index`, or when it cannot be loaded, the server uses the index
+bundled with the package. To build an index from a local `bec_docs` checkout:
+
+```bash
+bec-mcp-build-docs-index path/to/bec_docs --output bec_docs_index.json.gz
+```
 
 ## Development
 

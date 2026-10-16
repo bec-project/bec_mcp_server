@@ -36,6 +36,7 @@ dev = [
 
 [project.scripts]
 bec-mcp-server = "bec_mcp_server.server:main"
+bec-mcp-build-docs-index = "bec_mcp_server.docs.build:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["bec_mcp_server"]
