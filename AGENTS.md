@@ -18,7 +18,7 @@ local model and that sees nothing but the server's tools.
 2. **BEC is reached only through the server's single `BECClient`**, held by `BecConnection` in
    `client.py`. Never create a second client, a second connector, or a `redis` client of your own.
    Reads that have no public client accessor go through that client's own connector with
-   `MessageEndpoints`; whether those count as "through the client" is still an open question for v1.
+   `MessageEndpoints`; that counts as going through the client.
 3. **Read cached state only.** In `bec_lib`, `read()` and `get()` default to `cached=False`, which
    sends an RPC to the device server through the scan queue, and a signal of kind `omitted` is read
    that way even with `cached=True`. A diagnostic call must never queue an RPC or touch hardware.
