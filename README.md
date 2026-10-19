@@ -41,6 +41,7 @@ the first tool call. Command-line options can also be set through the environmen
 | `BEC_REDIS_PORT` | `6379` | Redis port of the BEC instance |
 | `BEC_REDIS_USERNAME` | unset | Redis ACL user |
 | `BEC_REDIS_PASSWORD` | unset | Redis ACL password |
+| `BEC_MCP_DOCS_INDEX` | latest index on gitea.psi.ch | Docs search index: an http(s) URL or a `.json`/`.json.gz` file (`--docs-index`) |
 
 The HTTP transport has no authentication yet, so keep it bound to `127.0.0.1`.
 
@@ -57,6 +58,34 @@ The HTTP transport has no authentication yet, so keep it bound to `127.0.0.1`.
 | `bec_scan_details` | One scan's signature and arguments |
 | `bec_scan_interlock` | The scan interlock configuration and the states it watches |
 | `bec_queue` | A compact summary of the scan queues |
+| `bec_docs_search` | The best-matching pages of the BEC documentation, or all pages without a query |
+| `bec_docs_page` | One documentation page, or one section of it |
+
+## Documentation search
+
+`bec_docs_search` and `bec_docs_page` search the [BEC documentation](https://bec-project.github.io/bec_docs/)
+with BM25, in memory, over a small index file (about 100 KB). No copy ships with the server: `bec_docs`
+builds the file from every published version of the docs and uploads it to PSI's gitea as the generic
+package `bec_docs_index`. By default the server downloads the latest one:
+
+```bash
+curl -OJ https://gitea.psi.ch/api/packages/bec/generic/bec_docs_index/latest/bec_docs_index.json.gz
+```
+
+`--docs-index` (or `BEC_MCP_DOCS_INDEX`) points the server at another URL, such as a pinned package
+version, or at a local file:
+
+```bash
+bec-mcp-server --docs-index /var/lib/bec-mcp/bec_docs_index.json.gz
+```
+
+A URL is downloaded again every hour and a local file is reloaded when it changes; if a later download
+fails, the last good copy keeps serving. Until the first download succeeds, the docs tools answer that the
+docs are unavailable and retry after five minutes. To build an index from a local `bec_docs` checkout:
+
+```bash
+bec-mcp-build-docs-index path/to/bec_docs --output bec_docs_index.json.gz
+```
 
 ## Development
 
