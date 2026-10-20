@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 
 from bec_mcp_server.client import BecConnection
@@ -20,22 +22,74 @@ def _env_int(name: str, default: int) -> int:
 
 READ_ONLY_TOOL = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 
+#: Host and Origin values the SDK accepts on a loopback bind; --allowed-hosts adds to these
+_LOOPBACK_HOSTS = ("127.0.0.1:*", "localhost:*", "[::1]:*")
+_LOOPBACK_ORIGINS = ("http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*")
+_PORT_SUFFIX = re.compile(r"(?::\d+|:\*)$")
 
-def build_server(  # pylint: disable=too-many-locals  # each registered tool is a local
+
+def host_patterns(entries: list[str]) -> list[str]:
+    """Host header values for --allowed-hosts entries.
+
+    ``name`` allows that name on any port; ``name:port`` and ``name:*`` are used as given.
+    """
+    patterns: list[str] = []
+    for entry in (e.strip() for e in entries):
+        if not entry:
+            continue
+        if _PORT_SUFFIX.search(entry.rsplit("]", 1)[-1]):
+            patterns.append(entry)
+        else:
+            patterns.extend([entry, f"{entry}:*"])
+    return patterns
+
+
+def transport_security(host: str, allowed_hosts: list[str]) -> TransportSecuritySettings | None:
+    """DNS-rebinding protection with extra Host values, or None to keep the SDK's default.
+
+    The SDK only accepts loopback names on a loopback bind, so an agent in a container that
+    reaches the host as host.docker.internal or host.containers.internal gets 421 Invalid Host
+    header unless that name is listed.
+    """
+    extra = host_patterns(allowed_hosts)
+    if not extra:
+        return None
+    hosts = list(_LOOPBACK_HOSTS)
+    bind = host.strip("[]").lower()
+    if bind not in ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::", ""):
+        hosts.extend(host_patterns([f"[{bind}]" if ":" in bind else bind]))
+    hosts.extend(h for h in extra if h not in hosts)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=list(_LOOPBACK_ORIGINS),
+    )
+
+
+def build_server(  # pylint: disable=too-many-locals,too-many-arguments  # one local per tool
     *,
     host: str = "127.0.0.1",
     port: int = 8000,
     streamable_http_path: str = "/mcp",
     connect_on_startup: bool = True,
     docs_index: str | None = None,
+    allowed_hosts: list[str] | None = None,
 ) -> FastMCP:
     """Create the MCP server and register the read-only BEC and documentation tools.
 
     Args:
         docs_index: Path or http(s) URL of the bec_docs search index; None downloads the latest
             one bec_docs publishes to gitea.psi.ch.
+        allowed_hosts: Extra Host header values the HTTP transport accepts, e.g.
+            ``host.docker.internal`` for an agent in a container.
     """
-    mcp = FastMCP("bec", host=host, port=port, streamable_http_path=streamable_http_path)
+    mcp = FastMCP(
+        "bec",
+        host=host,
+        port=port,
+        streamable_http_path=streamable_http_path,
+        transport_security=transport_security(host, allowed_hosts or []),
+    )
     bec = BecConnection()
     docs = DocsIndex(DocsIndexConfig(location=docs_index))
     if connect_on_startup:
@@ -170,6 +224,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="HTTP path for streamable HTTP transport.",
     )
     parser.add_argument(
+        "--allowed-hosts",
+        type=lambda value: [entry.strip() for entry in value.split(",") if entry.strip()],
+        default=[
+            entry.strip()
+            for entry in os.environ.get("BEC_MCP_ALLOWED_HOSTS", "").split(",")
+            if entry.strip()
+        ],
+        metavar="HOSTS",
+        help="Extra Host header values HTTP accepts, comma-separated, e.g. "
+        "'host.docker.internal'; a name without port matches any port.",
+    )
+    parser.add_argument(
         "--lazy-connect",
         action="store_true",
         help="Defer creating the BEC client until the first MCP tool call.",
@@ -193,5 +259,6 @@ def main(argv: list[str] | None = None) -> None:
         streamable_http_path=args.path,
         connect_on_startup=not args.lazy_connect,
         docs_index=args.docs_index,
+        allowed_hosts=args.allowed_hosts,
     )
     mcp.run(transport=args.transport)

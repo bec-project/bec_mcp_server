@@ -37,6 +37,7 @@ the first tool call. Command-line options can also be set through the environmen
 | `BEC_MCP_HOST` | `127.0.0.1` | HTTP bind address |
 | `BEC_MCP_PORT` | `8000` | HTTP port |
 | `BEC_MCP_PATH` | `/mcp` | HTTP path |
+| `BEC_MCP_ALLOWED_HOSTS` | none | Extra `Host` header values HTTP accepts, comma-separated; a name without port matches any port (`--allowed-hosts`) |
 | `BEC_REDIS_HOST` | `localhost` | Redis host of the BEC instance |
 | `BEC_REDIS_PORT` | `6379` | Redis port of the BEC instance |
 | `BEC_REDIS_USERNAME` | unset | Redis ACL user |
@@ -44,6 +45,14 @@ the first tool call. Command-line options can also be set through the environmen
 | `BEC_MCP_DOCS_INDEX` | latest index on gitea.psi.ch | Docs search index: an http(s) URL or a `.json`/`.json.gz` file (`--docs-index`) |
 
 The HTTP transport has no authentication yet, so keep it bound to `127.0.0.1`.
+
+An agent in a container reaches the host as `host.docker.internal` (Docker) or
+`host.containers.internal` (Podman). On a `127.0.0.1` bind the server only accepts loopback `Host`
+headers and answers anything else with `421 Invalid Host header`, so list that name:
+
+```bash
+bec-mcp-server --allowed-hosts host.docker.internal
+```
 
 ## Tools
 

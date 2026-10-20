@@ -121,3 +121,61 @@ def test_docs_index_comes_from_the_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("BEC_MCP_DOCS_INDEX", str(tmp_path / "index.json.gz"))
 
     assert parse_args([]).docs_index == str(tmp_path / "index.json.gz")
+
+
+INITIALIZE = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "test", "version": "0"},
+    },
+}
+
+
+def _post_initialize(host_header, allowed_hosts=None):
+    """POST initialize with a given Host header to a fresh server (a session manager runs once)."""
+    from starlette.testclient import TestClient
+
+    server = build_server(connect_on_startup=False, allowed_hosts=allowed_hosts)
+    with TestClient(server.streamable_http_app(), base_url=f"http://{host_header}") as client:
+        return client.post(
+            "/mcp", json=INITIALIZE, headers={"Accept": "application/json, text/event-stream"}
+        ).status_code
+
+
+@pytest.mark.filterwarnings("ignore:Using `httpx` with `starlette.testclient`")
+def test_container_host_is_refused_unless_allowed():
+    allowed = ["host.docker.internal"]
+
+    assert _post_initialize("host.docker.internal:8000") == 421
+    assert _post_initialize("host.docker.internal:8000", allowed) == 200
+    assert _post_initialize("127.0.0.1:8000", allowed) == 200
+    assert _post_initialize("evil.example.org:8000", allowed) == 421
+
+
+def test_allowed_host_names_match_any_port_unless_one_is_given():
+    from bec_mcp_server.server import host_patterns
+
+    assert host_patterns(["host.docker.internal", " ", "box:8021", "other:*"]) == [
+        "host.docker.internal",
+        "host.docker.internal:*",
+        "box:8021",
+        "other:*",
+    ]
+
+
+@pytest.mark.parametrize("flag", [["--allowed-hosts", "a.example, b.example:8000"], []])
+def test_allowed_hosts_come_from_flag_or_environment(monkeypatch, flag):
+    monkeypatch.setenv("BEC_MCP_ALLOWED_HOSTS", "host.docker.internal")
+
+    expected = ["a.example", "b.example:8000"] if flag else ["host.docker.internal"]
+    assert parse_args(flag).allowed_hosts == expected
+
+
+def test_allowed_hosts_default_to_none(monkeypatch):
+    monkeypatch.delenv("BEC_MCP_ALLOWED_HOSTS", raising=False)
+
+    assert parse_args([]).allowed_hosts == []
