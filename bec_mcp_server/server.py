@@ -17,11 +17,7 @@ def _env_int(name: str, default: int) -> int:
     return int(os.environ.get(name, str(default)))
 
 
-READ_ONLY_TOOL = ToolAnnotations(
-    readOnlyHint=True,
-    destructiveHint=False,
-    idempotentHint=True,
-)
+READ_ONLY_TOOL = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 
 
 def build_server(
@@ -31,12 +27,7 @@ def build_server(
     streamable_http_path: str = "/mcp",
     connect_on_startup: bool = True,
 ) -> FastMCP:
-    mcp = FastMCP(
-        "bec",
-        host=host,
-        port=port,
-        streamable_http_path=streamable_http_path,
-    )
+    mcp = FastMCP("bec", host=host, port=port, streamable_http_path=streamable_http_path)
     bec = BecConnection()
     if connect_on_startup:
         bec.connect()
@@ -86,16 +77,10 @@ def build_server(
         annotations=READ_ONLY_TOOL,
     )
     def bec_scans(
-        prefix: str | None = None,
-        base_class: str | None = None,
-        include_internal: bool = False,
+        prefix: str | None = None, base_class: str | None = None, include_internal: bool = False
     ) -> dict:
         """List available scans published by the BEC scan server with optional filtering."""
-        return bec.scans(
-            prefix=prefix,
-            base_class=base_class,
-            include_internal=include_internal,
-        )
+        return bec.scans(prefix=prefix, base_class=base_class, include_internal=include_internal)
 
     @mcp.tool(
         description="Safe to run. Read-only. Return the full scan metadata payload for one scan.",

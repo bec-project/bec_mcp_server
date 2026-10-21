@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import os
-import redis
 import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+import redis
 from bec_lib.client import BECClient
 from bec_lib.endpoints import MessageEndpoints
 from bec_lib.messages import StatusMessage
@@ -104,10 +104,7 @@ class BecConnection:
 
             acl_config = None
             if self.config.username is not None or self.config.password is not None:
-                acl_config = {
-                    "user": self.config.username,
-                    "password": self.config.password,
-                }
+                acl_config = {"user": self.config.username, "password": self.config.password}
 
             service_config = ServiceConfig(
                 config_name="client",
@@ -193,11 +190,7 @@ class BecConnection:
                 "available_devices": sorted(device_manager.devices.keys()),
             }
 
-        return {
-            "found": True,
-            "device_name": device_name,
-            "config": _jsonable(device.root._config),
-        }
+        return {"found": True, "device_name": device_name, "config": _jsonable(device.root._config)}
 
     def scans(
         self,
@@ -233,11 +226,7 @@ class BecConnection:
         scan = scans.get(scan_name)
 
         if scan is None:
-            return {
-                "found": False,
-                "scan_name": scan_name,
-                "available_scans": sorted(scans.keys()),
-            }
+            return {"found": False, "scan_name": scan_name, "available_scans": sorted(scans.keys())}
 
         return {
             "found": True,
@@ -247,13 +236,11 @@ class BecConnection:
 
     def scan_interlock(self) -> dict[str, Any]:
         client = self.client
-        interlock = client.builtin_actors.scan_interlock if client.builtin_actors is not None else None
+        interlock = (
+            client.builtin_actors.scan_interlock if client.builtin_actors is not None else None
+        )
         if interlock is None:
-            return {
-                "enabled": None,
-                "trigger_setting": None,
-                "states_watched": {},
-            }
+            return {"enabled": None, "trigger_setting": None, "states_watched": {}}
 
         return {
             "enabled": interlock.enabled,
@@ -284,7 +271,8 @@ class BecConnection:
                         "is_scan": _jsonable(item.is_scan),
                         "request_count": len(item.request_blocks or []),
                         "scan_types": [
-                            request_block.msg.scan_type for request_block in item.request_blocks or []
+                            request_block.msg.scan_type
+                            for request_block in item.request_blocks or []
                         ],
                     }
                     for item in info
@@ -297,11 +285,7 @@ class BecConnection:
         services = self.services()
         queue = self.queue()
         device_count = len(self.client.device_manager.devices)
-        scan_count = (
-            len(self.client.scans._available_scans)
-            if self.client.scans is not None
-            else 0
-        )
+        scan_count = len(self.client.scans._available_scans) if self.client.scans is not None else 0
 
         return {
             "connection": self.ping(),
@@ -309,10 +293,7 @@ class BecConnection:
             "device_count": device_count,
             "scan_count": scan_count,
             "queues": {
-                queue_name: {
-                    "status": queue_info["status"],
-                    "size": len(queue_info["items"]),
-                }
+                queue_name: {"status": queue_info["status"], "size": len(queue_info["items"])}
                 for queue_name, queue_info in queue["queues"].items()
             },
         }
