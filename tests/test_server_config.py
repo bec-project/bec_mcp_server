@@ -143,17 +143,28 @@ def _post_initialize(host_header, allowed_hosts=None):
     with TestClient(server.streamable_http_app(), base_url=f"http://{host_header}") as client:
         return client.post(
             "/mcp", json=INITIALIZE, headers={"Accept": "application/json, text/event-stream"}
-        ).status_code
+        )
 
 
 @pytest.mark.filterwarnings("ignore:Using `httpx` with `starlette.testclient`")
 def test_container_host_is_refused_unless_allowed():
     allowed = ["host.docker.internal"]
 
-    assert _post_initialize("host.docker.internal:8000") == 421
-    assert _post_initialize("host.docker.internal:8000", allowed) == 200
-    assert _post_initialize("127.0.0.1:8000", allowed) == 200
-    assert _post_initialize("evil.example.org:8000", allowed) == 421
+    assert _post_initialize("host.docker.internal:8000").status_code == 421
+    assert _post_initialize("host.docker.internal:8000", allowed).status_code == 200
+    assert _post_initialize("127.0.0.1:8000", allowed).status_code == 200
+    assert _post_initialize("evil.example.org:8000", allowed).status_code == 421
+
+
+@pytest.mark.filterwarnings("ignore:Using `httpx` with `starlette.testclient`")
+def test_initialize_reports_the_package_version():
+    from importlib import metadata
+
+    response = _post_initialize("127.0.0.1:8000")
+    data = next(line for line in response.text.splitlines() if line.startswith("data: "))
+    server_info = json.loads(data.removeprefix("data: "))["result"]["serverInfo"]
+
+    assert server_info == {"name": "bec", "version": metadata.version("bec-mcp-server")}
 
 
 def test_allowed_host_names_match_any_port_unless_one_is_given():

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+from importlib import metadata
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -26,6 +27,14 @@ READ_ONLY_TOOL = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idemp
 _LOOPBACK_HOSTS = ("127.0.0.1:*", "localhost:*", "[::1]:*")
 _LOOPBACK_ORIGINS = ("http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*")
 _PORT_SUFFIX = re.compile(r"(?::\d+|:\*)$")
+
+
+def server_version() -> str:
+    """The installed version of this package."""
+    try:
+        return metadata.version("bec-mcp-server")
+    except metadata.PackageNotFoundError:
+        return "0+unknown"
 
 
 def host_patterns(entries: list[str]) -> list[str]:
@@ -90,6 +99,8 @@ def build_server(  # pylint: disable=too-many-locals,too-many-arguments  # one l
         streamable_http_path=streamable_http_path,
         transport_security=transport_security(host, allowed_hosts or []),
     )
+    # FastMCP in mcp 1.x takes no version and would report the mcp SDK's as serverInfo.version.
+    mcp._mcp_server.version = server_version()  # pylint: disable=protected-access
     bec = BecConnection()
     docs = DocsIndex(DocsIndexConfig(location=docs_index))
     if connect_on_startup:
