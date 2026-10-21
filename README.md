@@ -108,3 +108,7 @@ pylint bec_mcp_server
 
 CI runs the tests on Python 3.11 to 3.14, ruff and Pylint, and a wheel build that is installed into
 a clean environment. Contributor and agent guidelines are in [AGENTS.md](AGENTS.md).
+
+A merge to `main` releases a new version with python-semantic-release: `feat` commits raise the
+minor version, `fix` and `perf` commits the patch version, and the tag gets a GitHub release with
+the wheel. The server reports its version to MCP clients as `serverInfo.version`.

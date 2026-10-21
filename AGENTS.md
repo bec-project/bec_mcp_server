@@ -109,6 +109,8 @@ client and the device manager; keep new logic testable without a running BEC. Na
 - **Conventional Commits are mandatory** — `<type>(<scope>): <summary>`, e.g.
   `fix(client): report a missing device instead of raising`. Allowed types: `build`, `chore`, `ci`,
   `docs`, `feat`, `fix`, `perf`, `refactor`, `style`, `test`.
+- Commit types decide the next release: on a merge to `main`, python-semantic-release raises the
+  minor version for `feat` and the patch version for `fix` and `perf`.
 - Keep commit messages to a single clean subject line. No tool attribution, `Generated with` notes,
   or `Co-Authored-By` trailers for tooling.
 - Pull requests describe the change in plain language and list the test evidence
