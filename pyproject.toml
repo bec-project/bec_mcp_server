@@ -5,27 +5,105 @@ build-backend = "hatchling.build"
 [project]
 name = "bec-mcp-server"
 version = "0.1.0"
-description = "A very small MCP server for inspecting BEC state"
+description = "A read-only MCP server for diagnosing a running BEC instance"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-  "bec-lib>=3.0",
-  "mcp>=1.0",
-  "qdrant-client>=1.10",
-  "uvicorn>=0.30",
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Physics",
 ]
+# BECClient.start() imports bec_ipython_client, so it is a runtime dependency even though
+# this package never imports it directly. The mcp ceiling stays until the server moves off
+# mcp.server.fastmcp, which mcp 2.0 removed.
+dependencies = ["bec-lib>=4.0", "bec-ipython-client>=4.0", "mcp>=1.8,<2"]
 
 [project.optional-dependencies]
 dev = [
+  "pylint>=3,<5",
   "pytest>=8,<10",
+  "pytest-random-order~=1.1",
+  "ruff~=0.17.1",
 ]
 
 [project.scripts]
 bec-mcp-server = "bec_mcp_server.server:main"
-bec-mcp-build-docs-index = "bec_mcp_server.docs_index:main"
+bec-mcp-build-docs-index = "bec_mcp_server.docs.build:main"
 
 [tool.hatch.build.targets.wheel]
-include = ["*"]
+packages = ["bec_mcp_server"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint]
+select = ["I"]
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
+
+[tool.pylint.main]
+fail-under = 9.0
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint."messages control"]
+disable = [
+  "missing-module-docstring",
+  "missing-class-docstring",
+  "logging-fstring-interpolation",
+  "line-too-long",
+  "too-many-instance-attributes",
+  "wrong-import-order",
+]
+
+[tool.semantic_release]
+build_command = "python -m build"
+version_toml = ["pyproject.toml:project.version"]
+
+[tool.semantic_release.commit_author]
+env = "GIT_COMMIT_AUTHOR"
+default = "semantic-release <semantic-release>"
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = [
+  "build",
+  "chore",
+  "ci",
+  "docs",
+  "feat",
+  "fix",
+  "perf",
+  "style",
+  "refactor",
+  "test",
+]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
+default_bump_level = 0
+
+[tool.semantic_release.remote]
+name = "origin"
+type = "github"
+ignore_token_for_push = true
+
+[tool.semantic_release.remote.token]
+env = "GH_TOKEN"
+
+[tool.semantic_release.publish]
+dist_glob_patterns = ["dist/*"]
+upload_to_vcs_release = true
