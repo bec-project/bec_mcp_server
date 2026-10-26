@@ -89,6 +89,7 @@ Every option can also be set through the environment:
 | `--client-max-age` | `BEC_MCP_CLIENT_MAX_AGE` | `21600` | Seconds before the BEC client is restarted; `0` never |
 | | `BEC_MCP_REDIS_TIMEOUT` | `5` | Seconds before a Redis connect or reply gives up |
 | | `BEC_MCP_LOG_DIR` | `~/.cache/bec-mcp-server/logs` | bec_lib's log files, unless the service config sets them |
+| `--docs-index` | `BEC_MCP_DOCS_INDEX` | published index | Docs search index: an http(s) URL or a `.json`/`.json.gz` file |
 
 Each tool call runs on a worker thread with a deadline, so a wedged Redis turns into an error
 message instead of a hung session. The audit log records the tool, its arguments, the duration and
@@ -105,6 +106,8 @@ the outcome of every call, including calls to unknown tools or with invalid argu
 | `bec_scan_help` | How to run one scan: its arguments with types, units, bounds and defaults, and an example call built from its signature with the session's own motors |
 | `bec_scan_history` | The latest finished scans with number, status and duration, and findings for scans that did not close cleanly; file paths are for the user |
 | `bec_logs` | Recent log records filtered by service, minimum level, text and time window, with repeats collapsed into counts and alarms merged into one list with findings |
+| `bec_docs_search` | The bec_docs pages that best match a question or keywords, with their URLs |
+| `bec_docs_page` | The text of one bec_docs page, or of one section of it |
 
 Every tool answers with the same top-level keys: `ok`, `summary`, `findings`, `data` and
 `truncated`. When BEC is unreachable, `bec_ping` and `bec_status` answer `ok: false` with the
@@ -112,8 +115,7 @@ reason rather than failing.
 
 ## Documentation search
 
-The docs tools `bec_docs_search` and `bec_docs_page` come back on this runtime in a later step of the v1 plan;
-the search package and the index builder are already here. They search the [BEC documentation](https://bec-project.github.io/bec_docs/)
+`bec_docs_search` and `bec_docs_page` search the [BEC documentation](https://bec-project.github.io/bec_docs/)
 with BM25, in memory, over a small index file (about 100 KB). No copy ships with the server: `bec_docs`
 builds the file from every published version of the docs and uploads it to PSI's gitea as the generic
 package `bec_docs_index`. By default the server downloads the latest one:
