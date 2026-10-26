@@ -11,7 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from bec_mcp_server.audit import AuditLog, AuditMiddleware
 from bec_mcp_server.runtime import Runtime
 from bec_mcp_server.settings import Settings
-from bec_mcp_server.tools import Connection, ToolContext, health
+from bec_mcp_server.tools import Connection, ToolContext, health, status
 
 SERVER_NAME = "bec"
 
@@ -38,7 +38,13 @@ scans, or change configuration. Suggest commands for the user to run instead.
 MODE_NOTES = {"diagnose": DIAGNOSE_MODE_NOTE}
 
 #: BEC tool modules per capability tier; each exposes register(server, connection, call)
-TIER_MODULES: dict[str, tuple[Any, ...]] = {"diagnose": ()}
+# fmt: off
+TIER_MODULES: dict[str, tuple[Any, ...]] = {
+    "diagnose": (
+        status,
+    ),
+}
+# fmt: on
 
 
 @dataclass

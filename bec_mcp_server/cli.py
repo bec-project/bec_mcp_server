@@ -10,6 +10,12 @@ import threading
 import time
 
 from bec_mcp_server.app import BecMcpApp, build_app
+from bec_mcp_server.bec.connection import (
+    DEFAULT_CLIENT_MAX_AGE_S,
+    BecConnection,
+    BecConnectionConfig,
+    BecUnavailableError,
+)
 from bec_mcp_server.settings import (
     DEFAULT_MAX_BEC_CALLS,
     DEFAULT_TOOL_TIMEOUT_S,
@@ -128,12 +134,60 @@ def build_parser() -> argparse.ArgumentParser:
         default=env_str("BEC_MCP_LOG_LEVEL", "INFO").upper(),
         help="Server log level; logs go to stderr. [BEC_MCP_LOG_LEVEL]",
     )
+    bec = parser.add_argument_group(
+        "BEC connection",
+        "The server reaches BEC through one BECClient. Without --redis or --config, Redis is "
+        "found like for any BEC client: BEC_SERVICE_CONFIG, then the deployment config, then "
+        "localhost:6379.",
+    )
+    bec.add_argument(
+        "--redis",
+        default=None,
+        metavar="HOST:PORT",
+        help="BEC's Redis. [BEC_REDIS_HOST, BEC_REDIS_PORT]",
+    )
+    bec.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help="BEC service config YAML, the same file the other BEC services use. "
+        "[BEC_MCP_SERVICE_CONFIG]",
+    )
+    bec.add_argument(
+        "--acl-file",
+        default=None,
+        metavar="PATH",
+        help="Env file with REDIS_USER= and REDIS_PASSWORD= lines for this server's own Redis "
+        "account, e.g. mcp_ro. BEC_REDIS_USERNAME and BEC_REDIS_PASSWORD, set together, win "
+        "over it. [BEC_MCP_ACL_FILE]",
+    )
+    bec.add_argument(
+        "--connect-on-startup",
+        action="store_true",
+        default=env_bool("BEC_MCP_CONNECT_ON_STARTUP"),
+        help="Connect to BEC before serving and exit if that fails. By default the client "
+        "starts on the first tool call, so the server answers while BEC is down. "
+        "[BEC_MCP_CONNECT_ON_STARTUP]",
+    )
+    bec.add_argument(
+        "--client-max-age",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="Restart the BEC client after this long, because some of its internal structures "
+        f"only grow (default {DEFAULT_CLIENT_MAX_AGE_S:.0f}; 0 never restarts). "
+        "[BEC_MCP_CLIENT_MAX_AGE]",
+    )
     return parser
 
 
 def parse_args(argv: list[str] | None = None) -> Settings:
     """Build the server settings from flags and the environment, refusing invalid values."""
-    args = build_parser().parse_args(argv)
+    return settings_from_args(build_parser().parse_args(argv))
+
+
+def settings_from_args(args: argparse.Namespace) -> Settings:
+    """The server settings for parsed arguments, refusing invalid values."""
     # argparse would validate choices only for flags, not for defaults read from the
     # environment, so a typo in BEC_MCP_TRANSPORT must be caught here, not fall back to stdio
     if args.transport not in TRANSPORTS:
@@ -166,6 +220,23 @@ def parse_args(argv: list[str] | None = None) -> Settings:
     )
 
 
+def connection_from_args(args: argparse.Namespace, settings: Settings) -> BecConnection | None:
+    """The BEC connection for modes that read BEC; flags win over the environment."""
+    if "diagnose" not in settings.tiers:
+        return None
+    environ = dict(os.environ)
+    if args.acl_file:
+        # --acl-file replaces BEC_MCP_ACL_FILE, like every other flag replaces its variable
+        environ.pop("BEC_MCP_ACL_FILE", None)
+    config = BecConnectionConfig.from_env(environ).with_overrides(
+        redis=args.redis,
+        service_config_path=args.config,
+        acl_file=args.acl_file,
+        client_max_age_s=args.client_max_age,
+    )
+    return BecConnection(config)
+
+
 def run(app: BecMcpApp) -> None:
     """Serve the app on its configured transport until the client or a signal ends it."""
     settings = app.context.settings
@@ -177,13 +248,17 @@ def run(app: BecMcpApp) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     """Entry point of the bec-mcp-server command."""
-    settings = parse_args(argv)
+    args = build_parser().parse_args(argv)
+    settings = settings_from_args(args)
+    connection = connection_from_args(args, settings)
     # SIGTERM (systemd stop, podman stop, an MCP client ending the session) must take the same
     # path as Ctrl-C: uvicorn re-raises the signal after its graceful shutdown, and with the
     # default handler the process would die there without closing the BEC connection
     signal.signal(signal.SIGTERM, signal.default_int_handler)
-    app = build_app(settings)
+    app = build_app(settings, connection=connection)
     try:
+        if connection is not None and args.connect_on_startup:
+            _connect_or_exit(connection)
         run(app)
     except KeyboardInterrupt:
         pass
@@ -192,6 +267,13 @@ def main(argv: list[str] | None = None) -> None:
         # not exit after stdio EOF or SIGINT
         app.close()
     _exit_if_stuck()
+
+
+def _connect_or_exit(connection: BecConnection) -> None:
+    try:
+        connection.connect()
+    except BecUnavailableError as exc:
+        raise SystemExit(f"bec-mcp-server: cannot connect to BEC at startup: {exc}") from None
 
 
 def _exit_if_stuck(grace: float = EXIT_GRACE_S) -> None:

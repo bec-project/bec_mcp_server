@@ -56,6 +56,31 @@ jobs:
       - name: Run unit tests
         run: python -m pytest --random-order -v tests/
 
+  e2e:
+    name: End-to-end against BEC 4 services
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+
+      - name: Install package with the BEC services and the e2e plugin
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,e2e]"
+
+      - name: Run end-to-end tests
+        run: |
+          mkdir -p /tmp/bec-e2e
+          python -m pytest -v --timeout 600 --start-servers --files-path /tmp/bec-e2e tests/e2e
+
   package:
     name: Build and install the wheel
     runs-on: ubuntu-latest
