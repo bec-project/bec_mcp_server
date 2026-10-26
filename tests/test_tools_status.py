@@ -194,7 +194,8 @@ def test_tools_are_registered_read_only_in_diagnose_mode(make_connection):
             return (await client.list_tools()).tools
 
     tools = {tool.name: tool for tool in anyio.run(list_tools)}
-    assert set(tools) == {"mcp_status", "bec_ping", "bec_status"}
+    # other diagnose modules register their tools too; this test owns only the status ones
+    assert {"mcp_status", "bec_ping", "bec_status"} <= set(tools)
     assert all(tool.annotations.read_only_hint for tool in tools.values())
 
 
