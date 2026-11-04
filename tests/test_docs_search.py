@@ -248,6 +248,74 @@ def test_search_without_matches_returns_no_results(tmp_path):
     assert docs.search("zzz_nothing_matches")["results"] == []
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "How do I move a motor?",
+        "how do i move a motor?",
+        "I want to move a motor.",
+        "I want to know how I can move a motor.",
+    ],
+)
+def test_question_pronoun_does_not_outweigh_the_topic(tmp_path, query):
+    repo = _make_docs_repo(tmp_path)
+    _write(repo / "docs" / "motor.md", "# Move a motor\n\nUse set to move the motor.")
+    _write(
+        repo / "docs" / "signals.md",
+        "# EPICS signals\n\n## Which one should I use?\n\nI use a read only signal.",
+    )
+    # Motor terminology is common, while the pronoun occurs on just one unrelated page.
+    for index in range(10):
+        _write(
+            repo / "docs" / f"reference-{index}.md",
+            f"# Reference {index}\n\nA motor may move during a scan.",
+        )
+    docs, _ = _docs(tmp_path, repo)
+
+    result = docs.search(query)
+
+    assert result["results"][0]["path"] == "motor.md"
+    assert "signals.md" not in {hit["path"] for hit in result["results"]}
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "i",
+        "`i`",
+        "How do I use `i`?",
+        "How do I use 'i'?",
+        'How do I use "i"?',
+        "dev.i",
+        "How do I read dev.i?",
+        "array[i]",
+        "f(foo(), i)",
+        "How do I use f(array[i], foo())?",
+        "i()",
+        "i_motor",
+        "I-V",
+        "I/O",
+    ],
+)
+def test_filler_filter_preserves_explicit_code_symbols(tmp_path, query):
+    repo = _make_docs_repo(tmp_path)
+    for name, symbol in [("a-other", "j"), ("z-current", "i")]:
+        _write(
+            repo / "docs" / f"{name}.md",
+            f"# Device\n\nVariable {symbol} stores the current. "
+            f"Use dev.{symbol}, array[{symbol}], f(foo(), {symbol}), {symbol}(), "
+            f"{symbol}_motor, {symbol.upper()}-V, or {symbol.upper()}/O.",
+        )
+    docs, _ = _docs(tmp_path, repo)
+
+    assert docs.search(query)["results"][0]["path"] == "z-current.md"
+
+
+@pytest.mark.parametrize("query", ["do not stop", "without waiting", "set vs put", "how to scan"])
+def test_query_filter_retains_context_and_action_words(query):
+    assert search._query_tokens(query) == search._tokenize(query)
+
+
 def test_toc_lists_every_page(tmp_path):
     docs, _ = _docs(tmp_path)
 
@@ -355,6 +423,36 @@ def test_broken_rebuild_keeps_serving_the_last_good_index(tmp_path):
     described = docs.describe()
     assert described["state"] == "loaded"
     assert "error" in described
+
+
+@pytest.mark.parametrize("damage", ["truncated", "invalid_deflate"])
+def test_bad_gzip_on_first_load_is_reported_as_unavailable(tmp_path, damage):
+    docs, index_path = _docs(tmp_path, name="index.json.gz")
+    raw = index_path.read_bytes()
+    # A missing footer raises EOFError; reserved DEFLATE block type 3 raises zlib.error.
+    broken = raw[:-8] if damage == "truncated" else raw[:10] + b"\x07" + raw[11:]
+    index_path.write_bytes(broken)
+
+    with pytest.raises(search.DocsUnavailableError, match="invalid gzip docs index"):
+        docs.search("profile picker")
+
+    assert docs.describe()["state"] == "unavailable"
+
+
+@pytest.mark.parametrize("damage", ["truncated", "invalid_deflate"])
+def test_bad_gzip_refresh_keeps_serving_the_last_good_index(tmp_path, damage):
+    docs, index_path = _docs(tmp_path, name="index.json.gz")
+    expected = docs.search("profile picker")
+    raw = index_path.read_bytes()
+    broken = raw[:-8] if damage == "truncated" else raw[:10] + b"\x07" + raw[11:]
+    index_path.write_bytes(broken)
+    os.utime(index_path, (0, 0))
+
+    assert docs.search("profile picker") == expected
+    assert docs.page("how-to/gui.md")["title"] == "Dock Area Profiles"
+    described = docs.describe()
+    assert described["state"] == "loaded"
+    assert "invalid gzip docs index" in described["error"]
 
 
 def test_unknown_schema_version_is_rejected(tmp_path):

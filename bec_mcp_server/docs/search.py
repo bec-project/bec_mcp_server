@@ -19,6 +19,7 @@ import re
 import threading
 import time
 import urllib.request
+import zlib
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -35,6 +36,15 @@ DEFAULT_INDEX_URL = (
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_:-]*")
 _TOKEN_SPLIT_RE = re.compile(r"[_:-]+")
+# Recognize code names, quoted symbols and delimiters without changing index tokenization.
+_QUERY_PART_RE = re.compile(
+    r"`[^`]+`|[\"'][A-Za-z0-9_][A-Za-z0-9_.:-]*[\"']"
+    r"|[A-Za-z0-9_][A-Za-z0-9_:-]*(?:[./][A-Za-z0-9_][A-Za-z0-9_:-]*)*"
+    r"|[()[\]]"
+)
+# Intentionally narrow: broader English stoplists lose useful context in docs queries.
+# The rare pronoun 'I' otherwise outweighs domain terms such as 'move motor'.
+_QUERY_FILLER = frozenset({"i"})
 _BM25_K1 = 1.2
 _BM25_B = 0.75
 
@@ -59,6 +69,28 @@ def _tokenize(text: str) -> list[str]:
         if len(parts) > 1:
             tokens.extend(parts)
     return tokens
+
+
+def _query_tokens(query: str) -> list[str]:
+    """Ignore conversational filler, preserving explicit code and standalone-symbol queries."""
+    tokens: list[str] = []
+    depth = 0
+    for match in _QUERY_PART_RE.finditer(query):
+        part = match.group()
+        if part in ("(", "["):
+            depth += 1
+            continue
+        if part in (")", "]"):
+            depth = max(0, depth - 1)
+            continue
+        words = _tokenize(part)
+        call_or_subscript = query[match.end() : match.end() + 1] in ("(", "[")
+        if depth or call_or_subscript or part[0] in "`\"'" or any(char in part for char in "_.:/-"):
+            tokens.extend(words)
+        else:
+            tokens.extend(word for word in words if word not in _QUERY_FILLER)
+    # A query consisting only of a symbol such as 'i' must still be searchable.
+    return tokens or _tokenize(query)
 
 
 def _make_snippet(text: str, query_tokens: list[str], max_chars: int = 240) -> str:
@@ -97,7 +129,10 @@ def _age_days(generated_at: str | None) -> int | None:
 
 def _decode_index(raw: bytes) -> dict[str, Any]:
     if raw[:2] == b"\x1f\x8b":
-        raw = gzip.decompress(raw)
+        try:
+            raw = gzip.decompress(raw)
+        except (EOFError, zlib.error) as exc:
+            raise ValueError(f"invalid gzip docs index: {exc}") from exc
     payload = json.loads(raw)
     if not isinstance(payload, dict) or payload.get("format") != INDEX_FORMAT:
         raise ValueError("not a BEC docs index")
@@ -354,7 +389,7 @@ class DocsIndex:
         """Return the best-matching documentation sections for a free-text query."""
         snapshot = self._ensure_loaded()
         query = query.strip()
-        query_tokens = _tokenize(query)
+        query_tokens = _query_tokens(query)
         scores = snapshot.score(query_tokens)
 
         limit = min(max(1, int(limit)), _MAX_RESULTS)

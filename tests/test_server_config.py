@@ -21,7 +21,9 @@ EXPECTED_TOOLS = {
 }
 
 
-def test_parse_args_defaults_to_streamable_http():
+def test_parse_args_defaults_to_streamable_http(monkeypatch):
+    # Golden docs tests opt in with this variable; this case tests the unset default.
+    monkeypatch.delenv("BEC_MCP_DOCS_INDEX", raising=False)
     args = parse_args([])
 
     assert args.transport == "streamable-http"
