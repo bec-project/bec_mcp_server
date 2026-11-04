@@ -61,6 +61,16 @@ def server_status(context: ToolContext) -> dict[str, Any]:
                 subject=latest.tool,
             )
         )
+    # describe() never loads or downloads the index, so this stays safe on the event loop
+    docs_index = context.docs.describe() if context.docs is not None else {"state": "off"}
+    if "error" in docs_index:
+        findings.append(
+            Finding("warning", "docs_index_error", docs_index["error"], subject="docs index")
+        )
+    if "warning" in docs_index:
+        findings.append(
+            Finding("info", "docs_index_stale", docs_index["warning"], subject="docs index")
+        )
     transport: dict[str, Any] = {"kind": settings.transport}
     if settings.transport == "streamable-http":
         transport.update(
@@ -84,6 +94,7 @@ def server_status(context: ToolContext) -> dict[str, Any]:
         "pools": pools,
         "calls": {"total": runtime.calls_total, "failed": runtime.calls_failed},
         "recent_failures": [record.describe() for record in failures[:STATUS_FAILURES_SHOWN]],
+        "docs_index": docs_index,
         "audit_log": "off" if context.settings.audit_log is None else "on",
     }
     summary = (

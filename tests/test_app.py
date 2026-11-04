@@ -34,7 +34,7 @@ def _payload(result):
 def test_diagnose_mode_serves_mcp_status():
     tools = _list_tools(build_app().server)
 
-    assert [tool.name for tool in tools] == ["mcp_status"]
+    assert [tool.name for tool in tools] == ["mcp_status", "bec_docs_search", "bec_docs_page"]
 
 
 def test_every_tool_is_annotated_read_only():
@@ -73,7 +73,10 @@ def test_mcp_status_reports_the_server_without_bec(call_tool):
     assert data["mode"] == "diagnose"
     assert data["bec"] == {"state": "not_configured"}
     assert data["tool_timeout_s"] == 12
-    assert data["pools"] == {"bec": {"capacity": 3, "in_flight": 0}}
+    assert data["pools"] == {
+        "bec": {"capacity": 3, "in_flight": 0},
+        "docs": {"capacity": 4, "in_flight": 0},
+    }
     assert data["versions"]["mcp_sdk"].startswith("2.")
     assert data["audit_log"] == "off"
 
@@ -299,8 +302,8 @@ def test_bec_tool_modules_get_the_connection_and_the_deadline_bound_call(call_to
 
     # the read ran on a worker thread with the connection's client
     assert payload == {"client": "client", "devices": ["samx"], "main": False}
-    # without a BEC connection only the server's own tool is served
-    assert [tool.name for tool in _list_tools(without_bec.server)] == ["mcp_status"]
+    # without a BEC connection no BEC tool module is registered
+    assert "device_probe" not in [tool.name for tool in _list_tools(without_bec.server)]
 
 
 def _on_main_thread():

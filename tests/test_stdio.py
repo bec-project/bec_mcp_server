@@ -52,6 +52,7 @@ def test_stdio_session_lists_tools_and_answers(tmp_path):
     assert {"bec_scans", "bec_scan_help", "bec_scan_history"} <= set(names)
     assert "bec_logs" in names
     assert {"bec_diagnose", "bec_device_diagnose"} <= set(names)
+    assert {"bec_docs_search", "bec_docs_page"} <= set(names)
     assert not status.is_error
     assert json.loads(status.content[0].text)["data"]["transport"] == {"kind": "stdio"}
     # the session ended cleanly, so the audit writer flushed its line on shutdown
