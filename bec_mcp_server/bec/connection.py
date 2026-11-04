@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from bec_mcp_server.bec import stdout_guard
+from bec_mcp_server.bec.log_cache import DEFAULT_LOG_CACHE_SIZE, LogCache
 
 if TYPE_CHECKING:  # pragma: no cover
     from bec_lib.client import BECClient
@@ -69,10 +70,13 @@ class BecConnectionConfig:
     log_dir: str | None = None
     client_max_age_s: float = DEFAULT_CLIENT_MAX_AGE_S
     redis_timeout_s: float = DEFAULT_REDIS_TIMEOUT_S
+    #: log records the server keeps in its own cache; 0 switches the cache off
+    log_cache_size: int = DEFAULT_LOG_CACHE_SIZE
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> BecConnectionConfig:
-        """Read BEC_REDIS_*, BEC_MCP_ACL_FILE, BEC_MCP_SERVICE_CONFIG and BEC_MCP_LOG_DIR."""
+        """Read BEC_REDIS_*, BEC_MCP_ACL_FILE, BEC_MCP_SERVICE_CONFIG, BEC_MCP_LOG_DIR and the
+        client and log cache limits."""
         env = os.environ if environ is None else environ
         username = env.get("BEC_REDIS_USERNAME") or None
         password = env.get("BEC_REDIS_PASSWORD") or None
@@ -102,6 +106,9 @@ class BecConnectionConfig:
             redis_timeout_s=_env_number(
                 env, "BEC_MCP_REDIS_TIMEOUT", float, DEFAULT_REDIS_TIMEOUT_S, minimum=0.1
             ),
+            log_cache_size=_env_number(
+                env, "BEC_MCP_LOG_CACHE_SIZE", int, DEFAULT_LOG_CACHE_SIZE, minimum=0
+            ),
         )
 
     def with_overrides(
@@ -111,6 +118,7 @@ class BecConnectionConfig:
         service_config_path: str | None = None,
         acl_file: str | None = None,
         client_max_age_s: float | None = None,
+        log_cache_size: int | None = None,
     ) -> BecConnectionConfig:
         """Apply command-line overrides (``--redis``, ``--config``, ``--acl-file``, ...).
 
@@ -128,6 +136,10 @@ class BecConnectionConfig:
             if client_max_age_s < 0:
                 raise SystemExit("the client max age must be 0 (no restarts) or positive")
             changes["client_max_age_s"] = client_max_age_s
+        if log_cache_size is not None:
+            if log_cache_size < 0:
+                raise SystemExit("the log cache size must be 0 (no cache) or positive")
+            changes["log_cache_size"] = log_cache_size
         return dataclasses.replace(self, **changes) if changes else self
 
 
@@ -282,6 +294,10 @@ class BecConnection:
         self._last_error: str | None = None
         self._last_error_at: float | None = None
         self._redis_target: str | None = None
+        #: the server's copy of BEC's log stream; follows whichever client is running
+        self.log_cache: LogCache | None = (
+            LogCache(self.config.log_cache_size) if self.config.log_cache_size > 0 else None
+        )
 
     # ------------------------------------------------------------------ borrowing the client
 
@@ -344,6 +360,10 @@ class BecConnection:
                     # shutdown() gave up waiting for this start; do not keep a live client
                     self._safe_shutdown(client)
                     raise BecUnavailableError("the BEC connection has been shut down")
+                if self.log_cache is not None:
+                    # still under the start lock, so no other call sees the client before the
+                    # cache follows it; attach() never raises
+                    self.log_cache.attach(client)
             with self._state_lock:
                 self._in_flight += 1
                 return self._client, self._generation
@@ -376,6 +396,7 @@ class BecConnection:
             self._started_at = None
             self._last_restart_reason = reason
         logger.info("restarting the BEC client: %s", reason)
+        self._detach_log_cache(f"the BEC client restarted ({reason})")
         self._safe_shutdown(client)
 
     def _restart_due_locked(self) -> str | None:
@@ -533,6 +554,10 @@ class BecConnection:
 
     # ------------------------------------------------------------------ shutdown and status
 
+    def _detach_log_cache(self, reason: str) -> None:
+        if self.log_cache is not None:
+            self.log_cache.detach(reason)
+
     def _safe_shutdown(self, client: Any) -> None:
         try:
             client.shutdown(per_thread_timeout_s=self.SHUTDOWN_THREAD_TIMEOUT_S)
@@ -555,6 +580,7 @@ class BecConnection:
                 client, self._client = self._client, None
                 self._started_at = None
             if client is not None:
+                self._detach_log_cache("the server shut down")
                 self._safe_shutdown(client)
         finally:
             self._start_lock.release()
@@ -570,6 +596,7 @@ class BecConnection:
 
     def state(self) -> dict[str, Any]:
         """Connection state for mcp_status. Never starts the client or touches Redis."""
+        log_cache = self.log_cache.state() if self.log_cache is not None else {"state": "off"}
         with self._state_lock:
             if self._closed:
                 state = "closed"
@@ -599,4 +626,5 @@ class BecConnection:
                     if self._last_error_at is not None
                     else None
                 ),
+                "log_cache": log_cache,
             }

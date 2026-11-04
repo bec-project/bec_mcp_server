@@ -5,7 +5,10 @@ the agent, so a dedicated log agent can later use this as its only tool.
 
 Every BEC service and client publishes its log records to one Redis stream that BEC trims to
 about 10,000 records. On a busy beamline that is well under an hour, so this shows what just
-happened, not an archive. Alarms reach the stream as well: ``raise_alarm`` logs every alarm it
+happened, not an archive. The records come from the server's log cache (``bec/log_cache.py``),
+which follows the stream in the background and numbers every record with an ``id`` that
+bec_log_range and bec_log_analysis accept; without the cache the stream is read directly.
+Alarms reach the stream as well: ``raise_alarm`` logs every alarm it
 raises (WARNING as a warning, MINOR and MAJOR as an error), and every client's alarm handler
 echoes WARNING and MINOR alarms it receives as a warning of its own. Both forms are folded into
 one alarm entry here, together with the MAJOR alarms the server's own client has retained.
@@ -16,32 +19,22 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Annotated, Any, Literal
 
 from bec_lib.alarm_handler import Alarms
-from bec_lib.endpoints import MessageEndpoints
 from pydantic import BeforeValidator, Field
 
-from bec_mcp_server.bec.connection import BecConnection
+from bec_mcp_server.bec.connection import BecConnection, BecUnavailableError
 from bec_mcp_server.bec.digest import iso_time
+from bec_mcp_server.bec.log_stream import (
+    LOG_LEVELS,
+    LOG_STREAM_CAPACITY,
+    LogRecord,
+    parse_log_message,
+    read_log_stream,
+)
 from bec_mcp_server.tools import READ_ONLY_TOOL, BecCall, Finding, tool_result
-
-#: BEC trims its log stream to about this many records (``bec_lib.logger``, ``max_size``)
-LOG_STREAM_CAPACITY = 10_000
-
-#: loguru level numbers as ``bec_lib.logger.LogLevel`` defines them
-LOG_LEVELS = {
-    "trace": 5,
-    "debug": 10,
-    "info": 20,
-    "console_log": 21,
-    "console_log_error": 22,
-    "success": 25,
-    "warning": 30,
-    "error": 40,
-    "critical": 50,
-}
 
 LogLevelName = Literal["trace", "debug", "info", "success", "warning", "error", "critical"]
 Detail = Literal["short", "full"]
@@ -71,7 +64,6 @@ ALARM_ECHO_WINDOW_S = 30.0
 #: shortest message that may match an alarm by containment rather than equality
 _MIN_CONTAINED_CHARS = 12
 
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _UUID_RE = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE
 )
@@ -88,24 +80,59 @@ _ALARM_ECHO_RE = re.compile(
 
 
 # ------------------------------------------------------------------------------------------------
-# Access to BEC: the only two functions that touch the client
+# Access to BEC: the log cache, or the stream and the client's alarms
 # ------------------------------------------------------------------------------------------------
 
 
-def read_log_stream(client: Any, count: int = LOG_STREAM_CAPACITY) -> list[Any]:
-    """Return the newest ``count`` log messages of BEC's shared log stream, oldest first.
+@dataclass(frozen=True)
+class LogSource:
+    """The records a log tool works on, oldest first, and where they came from."""
 
-    bec_lib has no public log reader, so this reads the stream through the client's own
-    connector. It is the one place to change if bec_lib grows an accessor. Decoding a full
-    10,000-record stream takes about half a second.
+    #: cached ``LogRecord``s, or ``LogMessage``s read from the stream
+    records: list[Any]
+    #: how many records the source holds at most; a full source may have lost older records
+    capacity: int
+    #: the records come from the log cache and carry ids
+    cached: bool
+    #: something the agent must know about these records, e.g. that BEC is unreachable
+    note: str | None = None
+    client_alarms: list[Any] = field(default_factory=list)
+
+
+def cached_or_streamed(connection: Any, client: Any) -> LogSource:
+    """The log cache while it follows the stream, else the stream itself (blocking)."""
+    cache = getattr(connection, "log_cache", None)
+    if cache is not None and cache.following:
+        view = cache.view()
+        return LogSource(view.records, view.capacity, cached=True)
+    return LogSource(read_log_stream(client), LOG_STREAM_CAPACITY, cached=False)
+
+
+def read_logs(connection: Any, *, with_alarms: bool = False) -> LogSource:
+    """Records for one tool call; starting the client here also starts the cache.
+
+    When BEC cannot be reached, the records the cache holds are still served, with a note,
+    because what happened just before BEC went away is often the answer. Without cached
+    records the BecUnavailableError propagates.
     """
-    entries = client.connector.get_last(MessageEndpoints.log(), count=count)
-    if entries is None:
-        return []
-    if isinstance(entries, dict):
-        # get_last returns a bare dict, not a list, when count == 1
-        entries = [entries]
-    return [entry["data"] for entry in entries if isinstance(entry, dict) and "data" in entry]
+    try:
+        with connection.use() as client:
+            source = cached_or_streamed(connection, client)
+            if with_alarms:
+                source = replace(source, client_alarms=read_client_alarms(client))
+            return source
+    except BecUnavailableError as exc:
+        cache = getattr(connection, "log_cache", None)
+        if cache is None or len(cache) == 0:
+            raise
+        view = cache.view()
+        return LogSource(
+            view.records,
+            view.capacity,
+            cached=True,
+            note=f"BEC is unreachable ({exc}), so these are the records the server cached "
+            "before; anything logged since is missing.",
+        )
 
 
 def read_client_alarms(client: Any) -> list[Any]:
@@ -125,62 +152,12 @@ def read_client_alarms(client: Any) -> list[Any]:
 
 
 @dataclass(frozen=True)
-class LogRecord:
-    service: str | None
-    level: str
-    level_no: int
-    timestamp: float | None
-    message: str
-    source: str | None
-
-
-@dataclass(frozen=True)
 class AlarmLine:
     severity: str
     device: str | None
     exception_type: str | None
     message: str
     echo: bool
-
-
-def parse_log_message(message: Any) -> LogRecord | None:
-    """Turn one ``LogMessage`` from the stream into a ``LogRecord``; None if unusable."""
-    log_msg = getattr(message, "log_msg", None)
-    log_type = str(getattr(message, "log_type", "") or "").lower()
-    if log_msg is None:
-        return None
-    if isinstance(log_msg, dict):
-        record = log_msg.get("record") or {}
-        level = record.get("level") or {}
-        level_name = str(level.get("name") or log_type.upper())
-        level_no = level.get("no")
-        text = record.get("message")
-        if text is None:
-            text = log_msg.get("text") or ""
-        timestamp = (record.get("time") or {}).get("timestamp")
-        service = log_msg.get("service_name") or None
-        name, function = record.get("name"), record.get("function")
-        source = f"{name}:{function}" if name and function else (name or None)
-    else:
-        # log_msg is typed dict | str; the str form carries no structure at all
-        level_name, level_no, text = log_type.upper(), None, log_msg
-        timestamp = service = source = None
-    if not isinstance(level_no, int):
-        level_no = LOG_LEVELS.get(log_type, LOG_LEVELS.get(level_name.lower(), 0))
-    if log_type == "console_log_error" or level_name.lower() == "console_log_error":
-        # bec_lib numbers console_log_error at 22, below WARNING, yet it carries client-side
-        # tracebacks; level="error" must not drop it
-        level_no = max(level_no, LOG_LEVELS["error"])
-    if not isinstance(timestamp, (int, float)):
-        timestamp = None
-    return LogRecord(
-        service=str(service) if service else None,
-        level=level_name,
-        level_no=level_no,
-        timestamp=float(timestamp) if timestamp is not None else None,
-        message=_ANSI_RE.sub("", str(text)).strip(),
-        source=source,
-    )
 
 
 def parse_alarm_line(text: str) -> AlarmLine | None:
@@ -246,11 +223,13 @@ class _Group:
     last: float | None = None
     order: int = 0
     variants: set[int] = field(default_factory=set)
+    last_id: int | None = None
 
     def add(self, record: LogRecord, order: int) -> None:
         """Count one more record; the newest one supplies the message shown."""
         self.count += 1
         self.order = order
+        self.last_id = record.id if record.id is not None else self.last_id
         self.message = record.message
         self.source = record.source or self.source
         if record.timestamp is not None:
@@ -271,6 +250,9 @@ class _Group:
         out["message"] = condense(self.message, detail)
         if detail == "full" and self.source:
             out["source"] = self.source
+        if self.last_id is not None:
+            # the newest record's cache id, for bec_log_range(around=...)
+            out["last_id"] = self.last_id
         return out
 
 
@@ -288,6 +270,7 @@ class _AlarmGroup:
     order: int = 0
     services: set[str] = field(default_factory=set)
     retained_by_client: bool = False
+    last_id: int | None = None
 
     @property
     def count(self) -> int:
@@ -320,6 +303,8 @@ class _AlarmGroup:
         self.order = max(self.order, order)
         self.exception_type = self.exception_type or line.exception_type
         self.device = self.device or line.device
+        if record is not None and record.id is not None:
+            self.last_id = max(self.last_id or 0, record.id)
         if record is not None and record.timestamp is not None:
             if self.first is None or record.timestamp < self.first:
                 self.first = record.timestamp
@@ -347,6 +332,8 @@ class _AlarmGroup:
             out["services"] = sorted(self.services)
         if self.retained_by_client:
             out["unhandled"] = True
+        if self.last_id is not None:
+            out["last_id"] = self.last_id
         out["message"] = condense(self.message, detail)
         return out
 
@@ -358,14 +345,19 @@ class _AlarmGroup:
         if self.retained_by_client and self.last is None:
             when = ", still unhandled (time unknown)"
         quote = _clip(condense(self.message, "short"), FINDING_QUOTE_CHARS)
-        return Finding(
-            severity=_FINDING_SEVERITY.get(self.severity, "warning"),
-            code=f"alarm.{self.severity.lower()}",
-            message=f"{self.severity} alarm{where}, {times}{when}: {quote}",
-            subject=self.device or "alarms",
-            next_tool="bec_device_diagnose" if self.device else None,
-            next_args={"device": self.device} if self.device else None,
-        )
+        severity = _FINDING_SEVERITY.get(self.severity, "warning")
+        code = f"alarm.{self.severity.lower()}"
+        message = f"{self.severity} alarm{where}, {times}{when}: {quote}"
+        if self.device:
+            return Finding(
+                severity, code, message, self.device, "bec_device_diagnose", {"device": self.device}
+            )
+        if self.last_id is not None:
+            # without a device, the records around the alarm are the next thing to read
+            return Finding(
+                severity, code, message, "alarms", "bec_log_range", {"around": self.last_id}
+            )
+        return Finding(severity, code, message, "alarms")
 
 
 #: alarm severity to finding severity
@@ -727,25 +719,27 @@ def logs(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     limit: int = DEFAULT_LIMIT,
     detail: Detail = "short",
 ) -> dict[str, Any]:
-    """bec_logs: read the log stream and the client's alarms, then digest them.
+    """bec_logs: read the cached records (or the stream) and the client's alarms, then digest.
 
     BEC being unreachable raises BecUnavailableError, a ConnectionError the runtime hands to
-    the agent with its message.
+    the agent with its message, unless the cache still holds records.
     """
     check_arguments(level, minutes, detail)
-    with connection.use() as client:
-        messages = read_log_stream(client)
-        client_alarms = read_client_alarms(client)
-    return logs_digest(
-        messages,
-        client_alarms,
+    source = read_logs(connection, with_alarms=True)
+    result = logs_digest(
+        source.records,
+        source.client_alarms,
         service=service,
         level=level,
         text=text,
         minutes=minutes,
         limit=limit,
         detail=detail,
+        stream_capacity=source.capacity,
     )
+    if source.note:
+        result["summary"] = f"{source.note} {result['summary']}"
+    return result
 
 
 # ---------------------------------------------------------------------- MCP registration
