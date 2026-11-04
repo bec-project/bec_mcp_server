@@ -23,6 +23,7 @@ from mcp.client import Client
 import bec_mcp_server.tools as tools_package
 from bec_mcp_server.app import build_app
 from bec_mcp_server.settings import Settings
+from bec_mcp_server.source.roots import SourceRoot
 
 _NEXT_TOOL, _NEXT_ARGS = (4, "next_tool"), (5, "next_args")
 
@@ -114,9 +115,10 @@ def suggested_calls() -> Iterator[tuple[str, str, set[str]]]:
 
 
 @pytest.fixture
-def registered(make_connection) -> dict[str, set[str]]:
-    """Every tool the server registers in diagnose mode, with its argument names."""
-    app = build_app(Settings(), connection=make_connection())
+def registered(make_connection, tmp_path) -> dict[str, set[str]]:
+    """Every tool the server registers in code mode, the superset of all modes, with arguments."""
+    settings = Settings(mode="code", code_roots=(SourceRoot("src", tmp_path),))
+    app = build_app(settings, connection=make_connection())
 
     async def list_tools():
         async with Client(app.server) as client:
@@ -132,6 +134,7 @@ def test_the_check_sees_the_findings_it_should():
     tools = {tool for _, tool, _ in suggested_calls()}
 
     assert {"bec_logs", "bec_device_diagnose", "bec_device_read", "mcp_status"} <= tools
+    assert {"bec_code_traceback", "bec_code_read"} <= tools
 
 
 def test_every_next_call_matches_a_registered_tool(registered):

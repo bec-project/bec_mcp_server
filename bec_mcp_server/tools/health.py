@@ -95,6 +95,8 @@ def server_status(context: ToolContext) -> dict[str, Any]:
         "calls": {"total": runtime.calls_total, "failed": runtime.calls_failed},
         "recent_failures": [record.describe() for record in failures[:STATUS_FAILURES_SHOWN]],
         "docs_index": docs_index,
+        # describe() never walks a root, so this stays safe on the event loop
+        "code": context.code.describe() if context.code is not None else {"state": "off"},
         "audit_log": "off" if context.settings.audit_log is None else "on",
     }
     summary = (
