@@ -96,6 +96,10 @@ docs are unavailable and retry after five minutes. To build an index from a loca
 bec-mcp-build-docs-index path/to/bec_docs --output bec_docs_index.json.gz
 ```
 
+Search ignores the conversational pronoun "I" in questions. Literal symbols remain searchable:
+use backticks or quotes for a single-letter symbol in a question, such as ``How do I read `i`?``.
+Code expressions such as `dev.i` and `array[i]`, and a query containing only `i`, also retain it.
+
 ## Development
 
 ```bash
