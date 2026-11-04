@@ -183,7 +183,8 @@ def build_server(  # pylint: disable=too-many-locals,too-many-arguments  # one l
     @mcp.tool(
         description="Safe to run. Read-only. Search the official BEC documentation for a question "
         "or keywords and return the best-matching pages with their URLs; without a query, list "
-        "every page.",
+        "every page. Search queries should be in English; translate the user's intent into "
+        "English while preserving API names, identifiers, and error messages verbatim.",
         annotations=READ_ONLY_TOOL,
     )
     def bec_docs_search(query: str = "", limit: int = 5) -> dict:
