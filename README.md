@@ -44,6 +44,9 @@ Anything else gets `421 Invalid Host header`, which protects against DNS rebindi
 bob's sandbox reaches the server through sandbox-runtime's proxy as `localhost4.localdomain4`,
 which is why the example lists that name.
 
+To run the server as a service on a beamline host and connect bob or other MCP clients to it,
+follow [deploy/README.md](deploy/README.md).
+
 ### Connecting to BEC
 
 The server starts its `BECClient` on the first tool call, so it answers even while BEC is down.
